@@ -13,6 +13,11 @@ CompileFlags:
     - --cuda-gpu-arch=sm_86
     - -isystem/opt/cuda/include
     - -I/opt/cuda/include
+    # The compile_commands.json strips --options-file (nvcc-only), which
+    # also drops the rsp file's -I<project>/src. Restore it relative to
+    # the CDB directory (build/) so includes like "core/tensor.h" resolve
+    # from tests/*.cu and any other source folders.
+    - -I../src
   Remove:
     - -ccbin=*
     - -forward-unknown-to-host-compiler

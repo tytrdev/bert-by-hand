@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cuda_check.h"
+#include "core/cuda_check.h"
 #include <cstddef>
 #include <cuda_runtime.h>
 

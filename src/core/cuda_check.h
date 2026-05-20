@@ -1,7 +1,7 @@
 #pragma once
 
-#include <cstdio>
-#include <cstdlib>
+#include <cstdio>  // IWYU pragma: keep
+#include <cstdlib> // IWYU pragma: keep
 #include <cuda_runtime.h>
 
 #define CUDA_CHECK(expr)                                                       \
