@@ -1,11 +1,46 @@
 """Reference Benchmark. Load model, print config."""
 
+import time
+import numpy as np
 import torch
+from dataclasses import dataclass
 from datasets import load_dataset
 from sentence_transformers import SentenceTransformer
 
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 CORPUS_NAME = "mteb/stsbenchmark-sts"
+
+
+@dataclass
+class BenchResult:
+    name: str
+    embeddings: np.ndarray()
+    elapsed_ms: float
+
+
+def encode_and_time(model, sentences, name, batch_size=32):
+    on_cuda = next(model.parameters()).device.type == "cuda"
+    _ = model.encode(
+        sentences[:batch_size],
+        batch_size=batch_size,
+        convert_to_numpy=True,
+        show_progress_bar=False,
+    )
+
+    if on_cuda:
+        torch.cuda.synchronize()
+
+    t0 = time.perf_counter()
+    embs = model.encode(
+        sentences, batch_size=batch_size, convert_to_numpy=True, show_progress_bar=False
+    )
+
+    if on_cuda:
+        torch.cuda.synchronize()
+
+    t1 = time.perf_counter()
+
+    return BenchResult(name=name, embeddings=embs, elapsed_ms=(t1 - t0) * 1000)
 
 
 def load_corpus():
@@ -25,6 +60,22 @@ def load_corpus():
     return sentences, pairs, scores
 
 
+def run_all(sentences):
+    results = []
+    model = SentenceTransformer(MODEL_NAME)
+
+    model.to("cpu").float()
+    results.append(encode_and_time(model, sentences, "cpu_fp32"))
+
+    model.to("cuda").float()
+    results.append(encode_and_time(model, sentences, "gpu_fp32"))
+
+    model.to("cuda").half()
+    results.append(encode_and_time(model, sentences, "gpu_fp16"))
+
+    return results
+
+
 def main():
     print(f"torch {torch.__version__}, cuda available: {torch.cuda.is_available()}")
 
@@ -42,8 +93,16 @@ def main():
         f"score range[{min(scores):.2f}, {max(scores):.2f}]",
     )
 
-    for s in sentences[:3]:
-        print(f"  - {s}")
+    results = run_all(sentences)
+
+    print(f"\n{'config':<12} {'total ms':>10} {'ms/sent':>10} {'sent/s':>10}")
+    print("-" * 45)
+
+    for r in results:
+        n = len(sentences)
+        per = r.elapsed_ms / n
+        thr = n / (r.elapsed_ms / 1000)
+        print(f"{r.name:<12} {r.elapsed_ms:>10.1f} {per:>10.3f} {thr:>10.1f}")
 
 
 if __name__ == "__main__":
