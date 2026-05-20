@@ -1,6 +1,9 @@
 # Min required cmake version
 cmake_minimum_required(VERSION 3.24)
 
+# Emit compile_commands.json for clangd / LSP.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # Project Specs
 project(bert_cuda LANGUAGES CXX CUDA)
 

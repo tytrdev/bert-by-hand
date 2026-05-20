@@ -1,0 +1,34 @@
+# clangd config for this CUDA project.
+#
+# Two things going on:
+#   1. Headers that aren't in compile_commands.json (and headers opened
+#      before the LSP has resolved them to a TU) need CUDA paths so
+#      <cuda_runtime.h> resolves. The Add: list provides those.
+#   2. nvcc-style flags that CMake puts into compile_commands.json
+#      confuse clangd; the Remove: list strips them.
+
+CompileFlags:
+  Add:
+    - --cuda-path=/opt/cuda
+    - --cuda-gpu-arch=sm_86
+    - -isystem/opt/cuda/include
+    - -I/opt/cuda/include
+  Remove:
+    - -ccbin=*
+    - -forward-unknown-to-host-compiler
+    - -rdc=*
+    - --generate-code*
+    - -gencode*
+    - --expt-*
+    - --options-file
+    - --diag-suppress=*
+    - --extended-lambda
+    - --threads=*
+  CompilationDatabase: build
+
+# Treat standalone CUDA headers as CUDA so they get the right driver mode.
+---
+If:
+  PathMatch: .*\.(cuh|cu)$
+CompileFlags:
+  Add: [-xcuda]
