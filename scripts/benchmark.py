@@ -1,15 +1,47 @@
 """Reference Benchmark. Load model, print config."""
 
-import time
+import json
 import numpy as np
+import platform
+import time
 import torch
 from dataclasses import dataclass
 from datasets import load_dataset
+from datetime import datetime
 from scipy.stats import spearmanr
 from sentence_transformers import SentenceTransformer
 
+BASELINE_PATH = "bench_baseline.json"
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 CORPUS_NAME = "mteb/stsbenchmark-sts"
+
+
+def save_baseline(results, sentences, pairs, scores):
+    payload = {
+        "model": MODEL_NAME,
+        "corpus": CORPUS_NAME,
+        "n_sentences": len(sentences),
+        "n_pairs": len(pairs),
+        "torch_version": torch.__version__,
+        "device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
+        "host": platform.node(),
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "results": [
+            {
+                "name": r.name,
+                "elapsed_ms": round(r.elapsed_ms, 3),
+                "ms_per_sentence": round(r.elapsed_ms / len(sentences), 5),
+                "throughputs_sps": round(len(sentences) / (r.elapsed_ms / 1000), 2),
+                "spearman_rho": round(correlate(r, pairs, scores), 6),
+            }
+            for r in results
+        ],
+    }
+
+    with open(BASELINE_PATH, "w") as f:
+        json.dump(payload, f, indent=2)
+
+    print(f"\nwrote {BASELINE_PATH}")
 
 
 @dataclass
@@ -115,6 +147,8 @@ def main():
         thr = n / (r.elapsed_ms / 1000)
         rho = correlate(r, pairs, scores)
         print(f"{r.name:<12} {r.elapsed_ms:>10.1f} {per:>10.3f} {thr:>10.1f} {rho:>8.4f}")
+
+    save_baseline(results, sentences, pairs, scores)
 
 
 if __name__ == "__main__":
