@@ -5,6 +5,7 @@ import numpy as np
 import torch
 from dataclasses import dataclass
 from datasets import load_dataset
+from scipy.stats import spearmanr
 from sentence_transformers import SentenceTransformer
 
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
@@ -16,6 +17,16 @@ class BenchResult:
     name: str
     embeddings: np.ndarray()
     elapsed_ms: float
+
+
+def correlate(result, pairs, gold):
+    embs = result.embeddings
+    idx = np.array(pairs)
+    a = embs[idx[:, 0]]
+    b = embs[idx[:, 1]]
+    sims = np.einsum("ij,ij->i", a, b)
+    rho, _ = spearmanr(sims, gold)
+    return float(rho)
 
 
 def encode_and_time(model, sentences, name, batch_size=32):
@@ -95,14 +106,15 @@ def main():
 
     results = run_all(sentences)
 
-    print(f"\n{'config':<12} {'total ms':>10} {'ms/sent':>10} {'sent/s':>10}")
-    print("-" * 45)
+    print(f"\n{'config':<12} {'total ms':>10} {'ms/sent':>10} {'sent/s':>10}, {'rho':>8}")
+    print("-" * 55)
 
     for r in results:
         n = len(sentences)
         per = r.elapsed_ms / n
         thr = n / (r.elapsed_ms / 1000)
-        print(f"{r.name:<12} {r.elapsed_ms:>10.1f} {per:>10.3f} {thr:>10.1f}")
+        rho = correlate(r, pairs, scores)
+        print(f"{r.name:<12} {r.elapsed_ms:>10.1f} {per:>10.3f} {thr:>10.1f} {rho:>8.4f}")
 
 
 if __name__ == "__main__":
