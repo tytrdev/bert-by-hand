@@ -1,6 +1,8 @@
 // #include "core/cuda_check.h"
 #include "core/device_buffer.h"
 #include "core/tensor.h"
+#include "core/timer.h"
+
 #include <cstdio>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
@@ -50,6 +52,21 @@ int main() {
 
   printf("Basic tensor test: rank=%d numel=%zu bytes=%zu\n", t.rank(),
          t.numel(), t.bytes());
+
+  printf("Basic timer test\n");
+
+  Timer timer;
+  timer.start();
+  CUDA_CHECK(cudaMemset(dbuf.data(), 0, dbuf.bytes()));
+  timer.stop();
+  printf("dbuf memset %zu bytes\n", dbuf.bytes());
+  timer.print();
+
+  timer.start();
+  CUDA_CHECK(cudaMemset(dbuf2.data(), 0, dbuf2.bytes()));
+  timer.stop();
+  printf("dbuf2 memset %zu bytes\n", dbuf.bytes());
+  timer.print();
 
   // Check that CUDA_CHECK throws errors cleanly
   // printf("Testing failing CUDA_CHECK\n");
