@@ -26,6 +26,10 @@ MODEL_CONFIG_KEYS = [
 WEIGHTS_DIR = Path("weights")
 SKIP_PREFIXES = ("pooler.",)
 
+REF_DIR = Path("ref")
+REF_SENTENCE = "A girl is styling her hair."
+SEQ_LEN = 128
+
 
 def get_bert(model):
     # Could be more complex for other models later...
@@ -84,6 +88,45 @@ def dump(model):
     print(f"skipped {len(skipped):>3}: {skipped}")
 
 
+def dump_ref(model):
+    tokenizer = model.tokenizer
+
+    enc = tokenizer(
+        REF_SENTENCE, padding="max_length", truncation=True, max_length=SEQ_LEN, return_tensors="pt"
+    )
+
+    input_ids = enc["input_ids"]
+    attention_mask = enc["attention_mask"]
+    token_type_ids = enc.get("token_type_ids", torch.zeros_like(input_ids))
+
+    model_cpu = model.to("cpu").float()
+    bert = get_bert(model_cpu)
+
+    with torch.no_grad():
+        out = bert(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+        )
+        hidden = out.last_hidden_state
+        mask = attention_mask.unsqueeze(-1).float()
+        pooled = (hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1e-9)
+        embedding = pooled / pooled.norm(dim=-1, keepdim=True).clamp(min=1e-12)
+
+    REF_DIR.mkdir(parents=True, exist_ok=True)
+    input_ids.numpy().astype(np.int32).tofile(REF_DIR / "input_ids.bin")
+    attention_mask.numpy().astype(np.int32).tofile(REF_DIR / "attention_mask.bin")
+    token_type_ids.numpy().astype(np.int32).tofile(REF_DIR / "token_type_ids.bin")
+    emb_np = embedding.numpy().astype(np.float32)
+    emb_np.tofile(REF_DIR / "expected_embedding.bin")
+
+    n_real = int(attention_mask.sum().item())
+    print(f"\nref: {REF_SENTENCE!r}")
+    print(f"  seq_len={SEQ_LEN}, real tokens={n_real}, padding={SEQ_LEN - n_real}")
+    print(f"  embedding[:5] = {emb_np[0, :5]}")
+    print(f"  L2 norm = {np.linalg.norm(emb_np)}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--inspect", action="store_true")
@@ -98,6 +141,7 @@ def main():
         inspect(model)
     elif args.dump:
         dump(model)
+        dump_ref(model)
     else:
         ap.print_help()
 

@@ -13,5 +13,7 @@ constexpr int FFN_DIM = 1536;
 constexpr int MAX_POSITION = 512;
 constexpr int TYPE_VOCAB_SIZE = 2;
 constexpr float LAYER_NORM_EPS = 1e-12f;
+constexpr int BATCH = 1;
+constexpr int SEQ_LEN = 128;
 
 } // namespace model
