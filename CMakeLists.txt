@@ -30,3 +30,4 @@ function(add_cuda_test name source)
 endfunction()
 
 add_cuda_test(sanity tests/sanity.cu)
+add_cuda_test(model_config tests/test_config.cu)
