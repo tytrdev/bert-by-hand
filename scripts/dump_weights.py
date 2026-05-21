@@ -4,13 +4,13 @@
 """
 
 import argparse
-
-# import torch
+import numpy as np
+import torch
+from pathlib import Path
 from sentence_transformers import SentenceTransformer
 
 # TODO: Make this an arg
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
-
 MODEL_CONFIG_KEYS = [
     "vocab_size",
     "hidden_size",
@@ -22,6 +22,9 @@ MODEL_CONFIG_KEYS = [
     "layer_norm_eps",
     "hidden_act",
 ]
+
+WEIGHTS_DIR = Path("weights")
+SKIP_PREFIXES = ("pooler.",)
 
 
 def get_bert(model):
@@ -53,6 +56,34 @@ def inspect(model):
     print(f"fp16 footprint: {total_bytes_fp16 / 1e6:.2f} MB")
 
 
+def dump(model):
+    WEIGHTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    bert = get_bert(model)
+    written, skipped = [], []
+
+    for name, t in bert.state_dict().items():
+        if name.startswith(SKIP_PREFIXES):
+            skipped.append(name)
+            continue
+
+        arr = t.detach().to(torch.float16).cpu().contiguous().numpy()
+        path = WEIGHTS_DIR / f"{name}.bin"
+        arr.tofile(path)
+        written.append((name, arr.shape, path))
+
+    # Sanity check
+    name0, shape0, path0 = written[0]
+    expected = bert.state_dict()[name0].detach().to(torch.float16).cpu().contiguous().numpy()
+    actual = np.fromfile(path0, dtype=np.float16).reshape(shape0)
+    assert np.array_equal(expected, actual), f"round-trip mismatch on {name0}"
+
+    total_bytes = sum(p.stat().st_size for _, _, p in written)
+    print(f"total:  {total_bytes / 1e6:.2f} MB on disk")
+    print(f"wrote   {len(written):>3} tensors to {WEIGHTS_DIR}")
+    print(f"skipped {len(skipped):>3}: {skipped}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--inspect", action="store_true")
@@ -66,7 +97,7 @@ def main():
     if args.inspect:
         inspect(model)
     elif args.dump:
-        raise NotImplementedError("Need to implement dump")
+        dump(model)
     else:
         ap.print_help()
 
