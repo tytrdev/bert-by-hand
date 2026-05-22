@@ -6,6 +6,7 @@
 import argparse
 import numpy as np
 import torch
+import torch.nn.functional as F
 from pathlib import Path
 from sentence_transformers import SentenceTransformer
 
@@ -148,6 +149,30 @@ def dump_matmul_refs(model):
         print(f"matmul ref [{tag}]: M={M} N={N} K={K} |C|={np.linalg.norm(C):.4f}")
 
 
+def dump_layernorm_ref():
+    M, D = 128, 384
+    eps = 1e-12
+    rng = np.random.default_rng(1)
+
+    x_f32 = (rng.standard_normal((M, D)) * 1.0).astype(np.float16).astype(np.float32)
+    gamma_f32 = (rng.standard_normal((D,)) * 0.1 + 1.0).astype(np.float16).astype(np.float32)
+    beta_f32 = (rng.standard_normal((D,)) * 0.1).astype(np.float16).astype(np.float32)
+
+    y = F.layer_norm(
+        torch.from_numpy(x_f32),
+        (D,),
+        weight=torch.from_numpy(gamma_f32),
+        bias=torch.from_numpy(beta_f32),
+        eps=eps,
+    ).numpy()
+
+    x_f32.astype(np.float16).tofile(REF_DIR / "ln_x.bin")
+    gamma_f32.astype(np.float16).tofile(REF_DIR / "ln_gamma.bin")
+    beta_f32.astype(np.float16).tofile(REF_DIR / "ln_beta.bin")
+    y.astype(np.float32).tofile(REF_DIR / "ln_y.bin")
+    print(f"ln ref: M={M} D={D} |y|={np.linalg.norm(y):.4f}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--inspect", action="store_true")
@@ -164,6 +189,7 @@ def main():
         dump(model)
         dump_ref(model)
         dump_matmul_refs(model)
+        dump_layernorm_ref()
     else:
         ap.print_help()
 

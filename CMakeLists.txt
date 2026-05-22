@@ -4,6 +4,9 @@ cmake_minimum_required(VERSION 3.24)
 # Emit compile_commands.json for clangd / LSP.
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Need to use older gcc on cachyos
+set(CMAKE_CUDA_HOST_COMPILER /usr/bin/g++-14)
+
 # Project Specs
 project(bert_cuda LANGUAGES CXX CUDA)
 
@@ -14,12 +17,10 @@ set(CMAKE_CUDA_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
-# Need to use older gcc on cachyos
-set(CMAKE_CUDA_HOST_COMPILER /usr/bin/g++-14)
 
 enable_testing()
 
-add_library(bert_kernels STATIC src/kernels/matmul.cu)
+add_library(bert_kernels STATIC src/kernels/matmul.cu src/kernels/layernorm.cu)
 target_include_directories(bert_kernels PUBLIC src)
 # Why is this needed?
 set_target_properties(bert_kernels PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
@@ -39,3 +40,4 @@ add_cuda_test(sanity tests/sanity.cu)
 add_cuda_test(model_config tests/test_config.cu)
 add_cuda_test(parity tests/test_parity.cu)
 add_cuda_test(matmul tests/test_matmul.cu)
+add_cuda_test(layernorm tests/test_layernorm.cu)
