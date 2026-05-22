@@ -16,4 +16,7 @@ constexpr float LAYER_NORM_EPS = 1e-12f;
 constexpr int BATCH = 1;
 constexpr int SEQ_LEN = 128;
 
+constexpr const char *WEIGHTS_DIR = "weights";
+constexpr const char *REF_DIR = "ref";
+
 } // namespace model

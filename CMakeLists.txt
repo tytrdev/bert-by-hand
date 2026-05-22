@@ -26,8 +26,13 @@ enable_testing()
 function(add_cuda_test name source)
   add_executable(test_${name} ${source})
   target_include_directories(test_${name} PRIVATE src)
-  add_test(NAME ${name} COMMAND test_${name})
+  add_test(
+    NAME ${name}
+    COMMAND test_${name}
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  )
 endfunction()
 
 add_cuda_test(sanity tests/sanity.cu)
 add_cuda_test(model_config tests/test_config.cu)
+add_cuda_test(parity tests/test_parity.cu)
