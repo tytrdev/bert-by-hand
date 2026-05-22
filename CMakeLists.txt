@@ -19,13 +19,15 @@ set(CMAKE_CUDA_HOST_COMPILER /usr/bin/g++-14)
 
 enable_testing()
 
-# Initial executable
-# add_executable(hello src/main.cu)
-# target_include_directories(hello PRIVATE src)
+add_library(bert_kernels STATIC src/kernels/matmul.cu)
+target_include_directories(bert_kernels PUBLIC src)
+# Why is this needed?
+set_target_properties(bert_kernels PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 
 function(add_cuda_test name source)
   add_executable(test_${name} ${source})
   target_include_directories(test_${name} PRIVATE src)
+  target_link_libraries(test_${name} PRIVATE bert_kernels)
   add_test(
     NAME ${name}
     COMMAND test_${name}
@@ -36,3 +38,4 @@ endfunction()
 add_cuda_test(sanity tests/sanity.cu)
 add_cuda_test(model_config tests/test_config.cu)
 add_cuda_test(parity tests/test_parity.cu)
+add_cuda_test(matmul tests/test_matmul.cu)

@@ -30,6 +30,11 @@ REF_DIR = Path("ref")
 REF_SENTENCE = "A girl is styling her hair."
 SEQ_LEN = 128
 
+REF_MATMUL_SHAPES = [
+    ("small", 4, 16, 8),  # for sanity
+    ("real", 128, 384, 384),  # qkv linear
+]
+
 
 def get_bert(model):
     # Could be more complex for other models later...
@@ -127,6 +132,22 @@ def dump_ref(model):
     print(f"  L2 norm = {np.linalg.norm(emb_np)}")
 
 
+def dump_matmul_refs(model):
+    print("\nDumping matmul refs")
+
+    REF_DIR.mkdir(parents=True, exist_ok=True)
+    rng = np.random.default_rng(0)
+    for tag, M, N, K in REF_MATMUL_SHAPES:
+        A = rng.standard_normal((M, K)).astype(np.float32) * 0.1
+        B = rng.standard_normal((N, K)).astype(np.float32) * 0.1
+        C = A @ B.T
+
+        A.astype(np.float16).tofile(REF_DIR / f"matmul_{tag}_A.bin")
+        B.astype(np.float16).tofile(REF_DIR / f"matmul_{tag}_B.bin")
+        C.astype(np.float32).tofile(REF_DIR / f"matmul_{tag}_C.bin")
+        print(f"matmul ref [{tag}]: M={M} N={N} K={K} |C|={np.linalg.norm(C):.4f}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--inspect", action="store_true")
@@ -142,6 +163,7 @@ def main():
     elif args.dump:
         dump(model)
         dump_ref(model)
+        dump_matmul_refs(model)
     else:
         ap.print_help()
 
