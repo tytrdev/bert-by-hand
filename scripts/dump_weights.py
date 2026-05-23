@@ -173,6 +173,17 @@ def dump_layernorm_ref():
     print(f"ln ref: M={M} D={D} |y|={np.linalg.norm(y):.4f}")
 
 
+def dump_gelu_ref():
+    n = 128 * 1536  # B*S * FFN_DIM, the BERT FFN intermediate footprint
+    rng = np.random.default_rng(2)
+    x_f32 = (rng.standard_normal(n) * 1.5).astype(np.float16).astype(np.float32)
+    y = F.gelu(torch.from_numpy(x_f32)).numpy()
+
+    x_f32.astype(np.float16).tofile(REF_DIR / "gelu_x.bin")
+    y.astype(np.float32).tofile(REF_DIR / "gelu_y.bin")
+    print(f"gelu ref: n={n} |y|={np.linalg.norm(y):.4f}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--inspect", action="store_true")
@@ -190,6 +201,7 @@ def main():
         dump_ref(model)
         dump_matmul_refs(model)
         dump_layernorm_ref()
+        dump_gelu_ref()
     else:
         ap.print_help()
 

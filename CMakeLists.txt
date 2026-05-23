@@ -20,9 +20,13 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 enable_testing()
 
-add_library(bert_kernels STATIC src/kernels/matmul.cu src/kernels/layernorm.cu)
+add_library(bert_kernels STATIC
+  src/kernels/matmul.cu
+  src/kernels/layernorm.cu
+  src/kernels/gelu.cu
+)
+
 target_include_directories(bert_kernels PUBLIC src)
-# Why is this needed?
 set_target_properties(bert_kernels PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 
 function(add_cuda_test name source)
@@ -41,3 +45,4 @@ add_cuda_test(model_config tests/test_config.cu)
 add_cuda_test(parity tests/test_parity.cu)
 add_cuda_test(matmul tests/test_matmul.cu)
 add_cuda_test(layernorm tests/test_layernorm.cu)
+add_cuda_test(gelu tests/test_gelu.cu)
