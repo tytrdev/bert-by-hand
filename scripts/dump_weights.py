@@ -133,6 +133,23 @@ def dump_ref(model):
     print(f"  L2 norm = {np.linalg.norm(emb_np)}")
 
 
+def dump_embedding_ref(model):
+    tokenizer = model.tokenizer
+    enc = tokenizer(
+        REF_SENTENCE, padding="max_length", truncation=True, max_length=SEQ_LEN, return_tensors="pt"
+    )
+    input_ids = enc["input_ids"]
+    token_type_ids = enc.get("token_type_ids", torch.zeros_like(input_ids))
+
+    bert = get_bert(model.to("cpu").float())
+    with torch.no_grad():
+        emb = bert.embeddings(input_ids=input_ids, token_type_ids=token_type_ids)
+
+    y = emb[0].numpy().astype(np.float32)
+    y.tofile(REF_DIR / "emb_out.bin")
+    print(f"emb ref: shape={y.shape} |y|={np.linalg.norm(y):.4f}")
+
+
 def dump_matmul_refs(model):
     print("\nDumping matmul refs")
 
@@ -199,6 +216,7 @@ def main():
     elif args.dump:
         dump(model)
         dump_ref(model)
+        dump_embedding_ref(model)
         dump_matmul_refs(model)
         dump_layernorm_ref()
         dump_gelu_ref()
