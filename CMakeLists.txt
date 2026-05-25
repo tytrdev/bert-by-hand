@@ -21,6 +21,7 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 enable_testing()
 
 add_library(bert_kernels STATIC
+  src/kernels/embedding.cu
   src/kernels/matmul.cu
   src/kernels/layernorm.cu
   src/kernels/gelu.cu
