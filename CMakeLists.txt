@@ -22,6 +22,7 @@ enable_testing()
 
 add_library(bert_kernels STATIC
   src/kernels/embedding.cu
+  src/kernels/bias.cu
   src/kernels/matmul.cu
   src/kernels/layernorm.cu
   src/kernels/gelu.cu
