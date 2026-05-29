@@ -201,6 +201,17 @@ def dump_gelu_ref():
     print(f"gelu ref: n={n} |y|={np.linalg.norm(y):.4f}")
 
 
+def dump_softmax_ref():
+    M, N = 128, 128
+    rng = np.random.default_rng(3)
+    x_f32 = (rng.standard_normal((M, N)) * 2.0).astype(np.float16).astype(np.float32)
+    y = F.softmax(torch.from_numpy(x_f32), dim=-1).numpy()
+
+    x_f32.astype(np.float16).tofile(REF_DIR / "softmax_x.bin")
+    y.astype(np.float32).tofile(REF_DIR / "softmax_y.bin")
+    print(f"softmax ref: M={M} N={N} |y|={np.linalg.norm(y):.4f}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--inspect", action="store_true")
@@ -220,6 +231,7 @@ def main():
         dump_matmul_refs(model)
         dump_layernorm_ref()
         dump_gelu_ref()
+        dump_softmax_ref()
     else:
         ap.print_help()
 
