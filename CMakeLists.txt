@@ -26,6 +26,7 @@ add_library(bert_kernels STATIC
   src/kernels/matmul.cu
   src/kernels/layernorm.cu
   src/kernels/gelu.cu
+  src/kernels/softmax.cu
 )
 
 target_include_directories(bert_kernels PUBLIC src)
