@@ -1,9 +1,11 @@
 #include "core/cuda_check.h"
 #include "kernels/attention.h"
+#include <cstdint>
 
 namespace {
 
 constexpr int ATTN_BLOCK = 256;
+constexpr float MASK_NEG = -1e30f;
 
 // (seq, heads * head_dim) -> (heads, seq, head_dim)
 __global__ void split_heads_kernel(const __half *__restrict__ x,
@@ -46,6 +48,20 @@ __global__ void attention_scores_kernel(const __half *__restrict__ q,
   scores[idx] = __float2half(acc * scale);
 }
 
+// scores[h, i, j] += -inf where key j is padding
+__global__ void mask_scores_kernel(__half *__restrict__ scores,
+                                   const int32_t *__restrict__ mask, int heads,
+                                   int seq) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int total = heads * seq * seq;
+  if (idx >= total)
+    return;
+
+  int j = idx % seq;
+  if (mask[j] == 0)
+    scores[idx] = __float2half(__half2float(scores[idx]) + MASK_NEG);
+}
+
 } // namespace
 
 void launch_split_heads(const __half *x, __half *out, int seq, int heads,
@@ -64,5 +80,14 @@ void launch_attention_scores(const __half *q, const __half *k, __half *scores,
   dim3 grid((total + ATTN_BLOCK - 1) / ATTN_BLOCK);
   attention_scores_kernel<<<grid, block>>>(q, k, scores, heads, seq, head_dim,
                                            scale);
+  CUDA_CHECK_KERNEL();
+}
+
+void launch_mask_scores(__half *scores, const int32_t *mask, int heads,
+                        int seq) {
+  int total = heads * seq * seq;
+  dim3 block(ATTN_BLOCK);
+  dim3 grid((total + ATTN_BLOCK - 1) / ATTN_BLOCK);
+  mask_scores_kernel<<<grid, block>>>(scores, mask, heads, seq);
   CUDA_CHECK_KERNEL();
 }

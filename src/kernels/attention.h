@@ -11,3 +11,8 @@ void launch_split_heads(const __half *x, __half *out, int seq, int heads,
 // q, k are (heads, seq, head_dim); scores is (heads, seq, seq).
 void launch_attention_scores(const __half *q, const __half *k, __half *scores,
                              int heads, int seq, int head_dim, float scale);
+
+// Push padded key columns (mask[j] == 0) to -inf before softmax so they drop
+// out. mask is the (seq,) attention mask. scores is (heads, seq, seq).
+void launch_mask_scores(__half *scores, const int32_t *mask, int heads,
+                        int seq);
