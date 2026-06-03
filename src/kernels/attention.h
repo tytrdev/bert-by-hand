@@ -16,3 +16,12 @@ void launch_attention_scores(const __half *q, const __half *k, __half *scores,
 // out. mask is the (seq,) attention mask. scores is (heads, seq, seq).
 void launch_mask_scores(__half *scores, const int32_t *mask, int heads,
                         int seq);
+
+// Weighted sum of values: ctx[h, i, .] = sum_j probs[h, i, j] * v[h, j, .]
+// probs is (heads, seq, seq), v is (heads, seq, head_dim).
+void launch_attention_context(const __half *probs, const __half *v, __half *ctx,
+                              int heads, int seq, int head_dim);
+
+// Inverse of split_heads: (heads, seq, head_dim) -> (seq, heads * head_dim).
+void launch_merge_heads(const __half *x, __half *out, int seq, int heads,
+                        int head_dim);

@@ -62,6 +62,47 @@ __global__ void mask_scores_kernel(__half *__restrict__ scores,
     scores[idx] = __float2half(__half2float(scores[idx]) + MASK_NEG);
 }
 
+// ctx[h, i, d] = sum_j probs[h, i, j] * v[h, j, d]
+__global__ void attention_context_kernel(const __half *__restrict__ probs,
+                                         const __half *__restrict__ v,
+                                         __half *__restrict__ ctx, int heads,
+                                         int seq, int head_dim) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int total = heads * seq * head_dim;
+  if (idx >= total)
+    return;
+
+  int d = idx % head_dim;
+  int i = (idx / head_dim) % seq;
+  int h = idx / (head_dim * seq);
+
+  const __half *p_row = probs + (size_t(h) * seq + i) * seq;
+  const __half *v_head = v + size_t(h) * seq * head_dim;
+
+  float acc = 0.0f;
+  for (int j = 0; j < seq; j++)
+    acc += __half2float(p_row[j]) * __half2float(v_head[j * head_dim + d]);
+  ctx[idx] = __float2half(acc);
+}
+
+// (heads, seq, head_dim) -> (seq, heads * head_dim)
+__global__ void merge_heads_kernel(const __half *__restrict__ x,
+                                   __half *__restrict__ out, int seq, int heads,
+                                   int head_dim) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int total = seq * heads * head_dim;
+  if (idx >= total)
+    return;
+
+  int d = idx % head_dim;
+  int h = (idx / head_dim) % heads;
+  int s = idx / (head_dim * heads);
+
+  int src = (h * seq + s) * head_dim + d;
+  int dst = s * (heads * head_dim) + h * head_dim + d;
+  out[dst] = x[src];
+}
+
 } // namespace
 
 void launch_split_heads(const __half *x, __half *out, int seq, int heads,
@@ -89,5 +130,24 @@ void launch_mask_scores(__half *scores, const int32_t *mask, int heads,
   dim3 block(ATTN_BLOCK);
   dim3 grid((total + ATTN_BLOCK - 1) / ATTN_BLOCK);
   mask_scores_kernel<<<grid, block>>>(scores, mask, heads, seq);
+  CUDA_CHECK_KERNEL();
+}
+
+void launch_attention_context(const __half *probs, const __half *v, __half *ctx,
+                              int heads, int seq, int head_dim) {
+  int total = heads * seq * head_dim;
+  dim3 block(ATTN_BLOCK);
+  dim3 grid((total + ATTN_BLOCK - 1) / ATTN_BLOCK);
+  attention_context_kernel<<<grid, block>>>(probs, v, ctx, heads, seq,
+                                            head_dim);
+  CUDA_CHECK_KERNEL();
+}
+
+void launch_merge_heads(const __half *x, __half *out, int seq, int heads,
+                        int head_dim) {
+  int total = seq * heads * head_dim;
+  dim3 block(ATTN_BLOCK);
+  dim3 grid((total + ATTN_BLOCK - 1) / ATTN_BLOCK);
+  merge_heads_kernel<<<grid, block>>>(x, out, seq, heads, head_dim);
   CUDA_CHECK_KERNEL();
 }

@@ -29,6 +29,7 @@ add_library(bert_kernels STATIC
   src/kernels/softmax.cu
   src/kernels/attention.cu
   src/kernels/residual.cu
+  src/model/encoder.cu
 )
 
 target_include_directories(bert_kernels PUBLIC src)
