@@ -2,6 +2,7 @@
 #include "core/model_config.h"
 #include "kernels/attention.h"
 #include "kernels/bias.h"
+#include "kernels/gelu.h"
 #include "kernels/layernorm.h"
 #include "kernels/matmul.h"
 #include "kernels/residual.h"
@@ -62,5 +63,23 @@ void attention_block(const __half *hidden, const AttnWeights &w,
   linear(as_half(merged), w.o_w, w.o_b, as_half(attn), SEQ_LEN, HIDDEN, HIDDEN);
   launch_residual_add(as_half(attn), hidden, rows);
   launch_layernorm(as_half(attn), w.ln_w, w.ln_b, out, SEQ_LEN, HIDDEN,
+                   LAYER_NORM_EPS);
+}
+
+void ffn_block(const __half *hidden, const FfnWeights &w, __half *out) {
+  using namespace model;
+  const int rows = SEQ_LEN * HIDDEN;
+
+  DeviceBuffer inter(size_t(SEQ_LEN) * FFN_DIM * sizeof(__half));
+  DeviceBuffer ffn(rows * sizeof(__half));
+
+  linear(hidden, w.inter_w, w.inter_b, as_half(inter), SEQ_LEN, FFN_DIM,
+         HIDDEN);
+  launch_gelu(as_half(inter), SEQ_LEN * FFN_DIM);
+
+  linear(as_half(inter), w.out_w, w.out_b, as_half(ffn), SEQ_LEN, HIDDEN,
+         FFN_DIM);
+  launch_residual_add(as_half(ffn), hidden, rows);
+  launch_layernorm(as_half(ffn), w.ln_w, w.ln_b, out, SEQ_LEN, HIDDEN,
                    LAYER_NORM_EPS);
 }
