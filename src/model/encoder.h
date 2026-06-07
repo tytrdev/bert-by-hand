@@ -28,3 +28,14 @@ void attention_block(const __half *hidden, const AttnWeights &w,
 // One BERT feed forward block: intermediate dense, gelu, output dense, residual
 // and LayerNorm. hidden and out are (SEQ_LEN, HIDDEN).
 void ffn_block(const __half *hidden, const FfnWeights &w, __half *out);
+
+// All weights for one encoder layer.
+struct LayerWeights {
+  AttnWeights attn;
+  FfnWeights ffn;
+};
+
+// One full BERT encoder layer: self-attention block then feed forward block.
+// hidden and out are (SEQ_LEN, HIDDEN); mask is the (SEQ_LEN,) attention mask.
+void encoder_layer(const __half *hidden, const LayerWeights &w,
+                   const int32_t *mask, __half *out);

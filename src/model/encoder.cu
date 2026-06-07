@@ -83,3 +83,11 @@ void ffn_block(const __half *hidden, const FfnWeights &w, __half *out) {
   launch_layernorm(as_half(ffn), w.ln_w, w.ln_b, out, SEQ_LEN, HIDDEN,
                    LAYER_NORM_EPS);
 }
+
+void encoder_layer(const __half *hidden, const LayerWeights &w,
+                   const int32_t *mask, __half *out) {
+  using namespace model;
+  DeviceBuffer attn(size_t(SEQ_LEN) * HIDDEN * sizeof(__half));
+  attention_block(hidden, w.attn, mask, as_half(attn));
+  ffn_block(as_half(attn), w.ffn, out);
+}
