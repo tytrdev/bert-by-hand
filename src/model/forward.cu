@@ -3,6 +3,8 @@
 #include "core/model_config.h"
 #include "kernels/embedding.h"
 #include "kernels/layernorm.h"
+#include "kernels/normalize.h"
+#include "kernels/pooling.h"
 #include "model/encoder.h"
 #include "model/forward.h"
 #include <utility>
@@ -40,4 +42,15 @@ void bert_encode(const ModelWeights &w, const int32_t *input_ids,
 
   CUDA_CHECK(
       cudaMemcpy(out, cur, mat * sizeof(__half), cudaMemcpyDeviceToDevice));
+}
+
+void bert_embed(const ModelWeights &w, const int32_t *input_ids,
+                const int32_t *token_type_ids, const int32_t *mask,
+                __half *embedding) {
+  using namespace model;
+  DeviceBuffer hidden(size_t(SEQ_LEN) * HIDDEN * sizeof(__half));
+
+  bert_encode(w, input_ids, token_type_ids, mask, as_half(hidden));
+  launch_mean_pool(as_half(hidden), mask, embedding, SEQ_LEN, HIDDEN);
+  launch_l2_normalize(embedding, HIDDEN);
 }
