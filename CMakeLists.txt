@@ -30,6 +30,7 @@ add_library(bert_kernels STATIC
   src/kernels/attention.cu
   src/kernels/residual.cu
   src/kernels/pooling.cu
+  src/kernels/normalize.cu
   src/model/encoder.cu
   src/model/forward.cu
 )
