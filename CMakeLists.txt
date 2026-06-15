@@ -38,6 +38,10 @@ add_library(bert_kernels STATIC
 target_include_directories(bert_kernels PUBLIC src)
 set_target_properties(bert_kernels PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 
+add_executable(bench bench/bench.cu)
+target_include_directories(bench PRIVATE src)
+target_link_libraries(bench PRIVATE bert_kernels)
+
 function(add_cuda_test name source)
   add_executable(test_${name} ${source})
   target_include_directories(test_${name} PRIVATE src)
