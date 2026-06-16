@@ -116,6 +116,11 @@ def run_all(sentences):
     model.to("cuda").half()
     results.append(encode_and_time(model, sentences, "gpu_fp16"))
 
+    # torch.compile fuses the graph, this is the real bar to chase
+    compiled = SentenceTransformer(MODEL_NAME).to("cuda").half()
+    compiled[0].auto_model = torch.compile(compiled[0].auto_model)
+    results.append(encode_and_time(compiled, sentences, "gpu_fp16_compiled"))
+
     return results
 
 
