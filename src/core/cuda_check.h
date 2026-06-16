@@ -16,8 +16,9 @@
     }                                                                          \
   } while (0)
 
+// Only checks the launch itself. No device sync, so async errors surface at the
+// next sync point (memcpy, event). Keeps the forward from stalling per kernel.
 #define CUDA_CHECK_KERNEL()                                                    \
   do {                                                                         \
     CUDA_CHECK(cudaGetLastError());                                            \
-    CUDA_CHECK(cudaDeviceSynchronize());                                       \
   } while (0)
