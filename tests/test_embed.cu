@@ -17,8 +17,9 @@ int main() {
   auto mask = load_ref_i32("attention_mask", SEQ_LEN);
   auto expected = load_ref_fp32("expected_embedding", HIDDEN);
 
+  Workspace ws = make_workspace();
   DeviceBuffer emb(HIDDEN * sizeof(__half));
-  bert_embed(w, static_cast<const int32_t *>(ids.data()),
+  bert_embed(ws, w, static_cast<const int32_t *>(ids.data()),
              static_cast<const int32_t *>(types.data()),
              static_cast<const int32_t *>(mask.data()),
              static_cast<__half *>(emb.data()));

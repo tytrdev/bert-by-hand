@@ -3,6 +3,7 @@
 #include "core/model_config.h"
 #include "core/parity.h"
 #include "model/encoder.h"
+#include "model/workspace.h"
 #include <cstdint>
 #include <cuda_fp16.h>
 #include <vector>
@@ -43,8 +44,9 @@ int main() {
   AttnWeights w{hp(qw), hp(qb), hp(kw), hp(kb), hp(vw),
                 hp(vb), hp(ow), hp(ob), hp(lw), hp(lb)};
 
+  Workspace ws = make_workspace();
   DeviceBuffer out(mat * sizeof(__half));
-  attention_block(hp(hidden), w, static_cast<const int32_t *>(mask.data()),
+  attention_block(ws, hp(hidden), w, static_cast<const int32_t *>(mask.data()),
                   static_cast<__half *>(out.data()));
 
   std::vector<__half> out_h(mat);

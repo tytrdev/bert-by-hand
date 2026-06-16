@@ -26,13 +26,15 @@ int main() {
   DeviceBuffer emb(HIDDEN * sizeof(__half));
   auto *emb_p = static_cast<__half *>(emb.data());
 
+  Workspace ws = make_workspace();
+
   for (int i = 0; i < WARMUP; i++)
-    bert_embed(w, ids_p, types_p, mask_p, emb_p);
+    bert_embed(ws, w, ids_p, types_p, mask_p, emb_p);
 
   Timer timer;
   timer.start();
   for (int i = 0; i < ITERS; i++)
-    bert_embed(w, ids_p, types_p, mask_p, emb_p);
+    bert_embed(ws, w, ids_p, types_p, mask_p, emb_p);
   timer.stop();
 
   float ms = timer.elapsed_ms();

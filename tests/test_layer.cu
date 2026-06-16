@@ -3,6 +3,7 @@
 #include "core/model_config.h"
 #include "core/parity.h"
 #include "model/encoder.h"
+#include "model/workspace.h"
 #include <cstdint>
 #include <cuda_fp16.h>
 #include <vector>
@@ -53,8 +54,9 @@ int main() {
       {hp(iw), hp(ib), hp(fw), hp(fb), hp(fln_w), hp(fln_b)},
   };
 
+  Workspace ws = make_workspace();
   DeviceBuffer out(mat * sizeof(__half));
-  encoder_layer(hp(hidden), w, static_cast<const int32_t *>(mask.data()),
+  encoder_layer(ws, hp(hidden), w, static_cast<const int32_t *>(mask.data()),
                 static_cast<__half *>(out.data()));
 
   std::vector<__half> out_h(mat);

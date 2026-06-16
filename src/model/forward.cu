@@ -17,26 +17,22 @@ inline __half *as_half(DeviceBuffer &b) {
 
 } // namespace
 
-void bert_encode(const ModelWeights &w, const int32_t *input_ids,
+void bert_encode(Workspace &ws, const ModelWeights &w, const int32_t *input_ids,
                  const int32_t *token_type_ids, const int32_t *mask,
                  __half *out) {
   using namespace model;
   using detail::h;
   const size_t mat = size_t(SEQ_LEN) * HIDDEN;
 
-  DeviceBuffer summed(mat * sizeof(__half));
-  DeviceBuffer a(mat * sizeof(__half));
-  DeviceBuffer b(mat * sizeof(__half));
-
   launch_embedding(input_ids, token_type_ids, h(w.word_emb), h(w.pos_emb),
-                   h(w.type_emb), as_half(summed), SEQ_LEN, HIDDEN);
-  launch_layernorm(as_half(summed), h(w.emb_ln_w), h(w.emb_ln_b), as_half(a),
-                   SEQ_LEN, HIDDEN, LAYER_NORM_EPS);
+                   h(w.type_emb), as_half(ws.summed), SEQ_LEN, HIDDEN);
+  launch_layernorm(as_half(ws.summed), h(w.emb_ln_w), h(w.emb_ln_b),
+                   as_half(ws.ping), SEQ_LEN, HIDDEN, LAYER_NORM_EPS);
 
-  __half *cur = as_half(a);
-  __half *nxt = as_half(b);
+  __half *cur = as_half(ws.ping);
+  __half *nxt = as_half(ws.pong);
   for (int i = 0; i < NUM_LAYERS; i++) {
-    encoder_layer(cur, w.layer(i), mask, nxt);
+    encoder_layer(ws, cur, w.layer(i), mask, nxt);
     std::swap(cur, nxt);
   }
 
@@ -44,13 +40,12 @@ void bert_encode(const ModelWeights &w, const int32_t *input_ids,
       cudaMemcpy(out, cur, mat * sizeof(__half), cudaMemcpyDeviceToDevice));
 }
 
-void bert_embed(const ModelWeights &w, const int32_t *input_ids,
+void bert_embed(Workspace &ws, const ModelWeights &w, const int32_t *input_ids,
                 const int32_t *token_type_ids, const int32_t *mask,
                 __half *embedding) {
   using namespace model;
-  DeviceBuffer hidden(size_t(SEQ_LEN) * HIDDEN * sizeof(__half));
 
-  bert_encode(w, input_ids, token_type_ids, mask, as_half(hidden));
-  launch_mean_pool(as_half(hidden), mask, embedding, SEQ_LEN, HIDDEN);
+  bert_encode(ws, w, input_ids, token_type_ids, mask, as_half(ws.attn_out));
+  launch_mean_pool(as_half(ws.attn_out), mask, embedding, SEQ_LEN, HIDDEN);
   launch_l2_normalize(embedding, HIDDEN);
 }
