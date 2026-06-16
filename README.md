@@ -33,7 +33,15 @@ Single sentence latency on the 3090 (batch 1, seq 128):
 
 | impl              | ms / embedding | embeddings / sec |
 | ----------------- | -------------- | ---------------- |
-| pytorch gpu fp16  | 1.60           | 625              |
-| this (naive cuda) | 7.37           | 136              |
+| this (tiled cuda) | 2.56           | 390              |
+| pytorch gpu fp16  | ~2.1           | ~475             |
 
-Parity is done. The CUDA path is still the naive version (every kernel syncs, scratch reallocated each call, textbook matmul), so pytorch wins for now. Next up is perf.
+A shared-memory tiled matmul got us to roughly naive pytorch parity at batch 1. But batch 1 is pytorch at its weakest (launch bound, gpu mostly idle). The real target is corpus throughput, where pytorch batches and saturates the card (scripts/benchmark.py, batch 32):
+
+| pytorch (batch 32, corpus) | ms / sent | sent / sec |
+| -------------------------- | --------- | ---------- |
+| gpu fp16                   | 0.092     | 10859      |
+| gpu fp16 + torch.compile   | 0.119     | 8410       |
+| gpu fp32                   | 0.193     | 5189       |
+
+So we match pytorch where it is weak and lose ~28x where it is strong. Still plenty to do: tensor cores on the matmul, batching, and skipping padded tokens (the ref sentence is 9 real tokens out of 128).
