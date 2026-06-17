@@ -3,6 +3,7 @@
 #include "core/model_config.h"
 #include "core/parity.h"
 #include "model/encoder.h"
+#include "model/weights.h"
 #include "model/workspace.h"
 #include <cstdint>
 #include <cuda_fp16.h>
@@ -27,22 +28,15 @@ int main() {
 
   auto mask = load_ref_i32("attention_mask", SEQ_LEN);
 
-  auto qw =
-      load_weight_fp16(p + "attention.self.query.weight", HIDDEN * HIDDEN);
-  auto qb = load_weight_fp16(p + "attention.self.query.bias", HIDDEN);
-  auto kw = load_weight_fp16(p + "attention.self.key.weight", HIDDEN * HIDDEN);
-  auto kb = load_weight_fp16(p + "attention.self.key.bias", HIDDEN);
-  auto vw =
-      load_weight_fp16(p + "attention.self.value.weight", HIDDEN * HIDDEN);
-  auto vb = load_weight_fp16(p + "attention.self.value.bias", HIDDEN);
+  auto qkv_w = detail::load_qkv(p, "weight", size_t(HIDDEN) * HIDDEN);
+  auto qkv_b = detail::load_qkv(p, "bias", HIDDEN);
   auto ow =
       load_weight_fp16(p + "attention.output.dense.weight", HIDDEN * HIDDEN);
   auto ob = load_weight_fp16(p + "attention.output.dense.bias", HIDDEN);
   auto lw = load_weight_fp16(p + "attention.output.LayerNorm.weight", HIDDEN);
   auto lb = load_weight_fp16(p + "attention.output.LayerNorm.bias", HIDDEN);
 
-  AttnWeights w{hp(qw), hp(qb), hp(kw), hp(kb), hp(vw),
-                hp(vb), hp(ow), hp(ob), hp(lw), hp(lb)};
+  AttnWeights w{hp(qkv_w), hp(qkv_b), hp(ow), hp(ob), hp(lw), hp(lb)};
 
   Workspace ws = make_workspace();
   DeviceBuffer out(mat * sizeof(__half));

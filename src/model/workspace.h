@@ -5,15 +5,12 @@
 #include <cuda_fp16.h>
 
 // Scratch for one forward pass, allocated once and reused across every layer
-// and every call. Sizes are fixed by the model config (BATCH=1), so the same
-// Workspace serves the whole encoder. Buffers are disjoint where they need to
-// be live at once; the per-layer attention and ffn scratch is overwritten each
-// layer.
+// and every call. Sizes are fixed by the model config; the same Workspace
+// serves the whole encoder.
 struct Workspace {
-  DeviceBuffer q, k, v;            // qkv projections
-  DeviceBuffer qh, kh, vh;         // split into heads
-  DeviceBuffer scores;             // (heads, seq, seq)
-  DeviceBuffer ctx, merged;        // attention output, pre projection
+  DeviceBuffer qkv;                // fused q/k/v projection (rows, 3 * HIDDEN)
+  DeviceBuffer scores;             // (batch * heads, seq, seq)
+  DeviceBuffer merged;             // attention context, merged heads
   DeviceBuffer attn_proj;          // attention output dense
   DeviceBuffer inter, ffn_proj;    // ffn intermediate and output dense
   DeviceBuffer attn_out;           // layer attention result / final hidden
@@ -27,11 +24,13 @@ inline Workspace make_workspace(int batch = 1) {
       size_t(batch) * NUM_HEADS * SEQ_LEN * SEQ_LEN * sizeof(__half);
   const size_t inter = size_t(batch) * SEQ_LEN * FFN_DIM * sizeof(__half);
   return {
-      DeviceBuffer(mat),    DeviceBuffer(mat),   DeviceBuffer(mat),
-      DeviceBuffer(mat),    DeviceBuffer(mat),   DeviceBuffer(mat),
-      DeviceBuffer(scores), DeviceBuffer(mat),   DeviceBuffer(mat),
-      DeviceBuffer(mat),    DeviceBuffer(inter), DeviceBuffer(mat),
-      DeviceBuffer(mat),    DeviceBuffer(mat),   DeviceBuffer(mat),
-      DeviceBuffer(mat),
+      DeviceBuffer(3 * mat),                    // qkv
+      DeviceBuffer(scores),                     // scores
+      DeviceBuffer(mat),                        // merged
+      DeviceBuffer(mat),                        // attn_proj
+      DeviceBuffer(inter),   DeviceBuffer(mat), // inter ffn_proj
+      DeviceBuffer(mat),                        // attn_out
+      DeviceBuffer(mat),     DeviceBuffer(mat),
+      DeviceBuffer(mat), // summed ping pong
   };
 }

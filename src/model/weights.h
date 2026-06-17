@@ -4,6 +4,7 @@
 #include "core/loader.h"
 #include "core/model_config.h"
 #include "model/encoder.h"
+#include <algorithm>
 #include <cuda_fp16.h>
 #include <string>
 #include <vector>
@@ -19,7 +20,7 @@ struct ModelWeights {
   DeviceBuffer emb_ln_b;
 
   struct Layer {
-    DeviceBuffer q_w, q_b, k_w, k_b, v_w, v_b;
+    DeviceBuffer qkv_w, qkv_b;
     DeviceBuffer o_w, o_b, attn_ln_w, attn_ln_b;
     DeviceBuffer inter_w, inter_b, out_w, out_b, ffn_ln_w, ffn_ln_b;
   };
@@ -34,16 +35,30 @@ inline const __half *h(const DeviceBuffer &b) {
   return static_cast<const __half *>(b.data());
 }
 
+// Concatenate query/key/value projections (each `each` elements) into one
+// buffer, stacking along the output dimension so one matmul yields all of QKV.
+inline DeviceBuffer load_qkv(const std::string &p, const char *suffix,
+                             size_t each) {
+  using namespace model;
+  const char *parts[] = {"attention.self.query.", "attention.self.key.",
+                         "attention.self.value."};
+  std::vector<__half> all(3 * each);
+  for (int i = 0; i < 3; i++) {
+    auto v = read_bin<__half>(
+        std::string(WEIGHTS_DIR) + "/" + p + parts[i] + suffix + ".bin", each);
+    std::copy(v.begin(), v.end(), all.begin() + size_t(i) * each);
+  }
+  DeviceBuffer buf(all.size() * sizeof(__half));
+  buf.from_host(all.data(), all.size() * sizeof(__half));
+  return buf;
+}
+
 inline ModelWeights::Layer load_layer(int i) {
   using namespace model;
   const std::string p = "encoder.layer." + std::to_string(i) + ".";
   return {
-      load_weight_fp16(p + "attention.self.query.weight", HIDDEN * HIDDEN),
-      load_weight_fp16(p + "attention.self.query.bias", HIDDEN),
-      load_weight_fp16(p + "attention.self.key.weight", HIDDEN * HIDDEN),
-      load_weight_fp16(p + "attention.self.key.bias", HIDDEN),
-      load_weight_fp16(p + "attention.self.value.weight", HIDDEN * HIDDEN),
-      load_weight_fp16(p + "attention.self.value.bias", HIDDEN),
+      load_qkv(p, "weight", size_t(HIDDEN) * HIDDEN),
+      load_qkv(p, "bias", HIDDEN),
       load_weight_fp16(p + "attention.output.dense.weight", HIDDEN * HIDDEN),
       load_weight_fp16(p + "attention.output.dense.bias", HIDDEN),
       load_weight_fp16(p + "attention.output.LayerNorm.weight", HIDDEN),
@@ -63,8 +78,8 @@ inline LayerWeights ModelWeights::layer(int i) const {
   using detail::h;
   const Layer &l = layers[i];
   return {
-      {h(l.q_w), h(l.q_b), h(l.k_w), h(l.k_b), h(l.v_w), h(l.v_b), h(l.o_w),
-       h(l.o_b), h(l.attn_ln_w), h(l.attn_ln_b)},
+      {h(l.qkv_w), h(l.qkv_b), h(l.o_w), h(l.o_b), h(l.attn_ln_w),
+       h(l.attn_ln_b)},
       {h(l.inter_w), h(l.inter_b), h(l.out_w), h(l.out_b), h(l.ffn_ln_w),
        h(l.ffn_ln_b)},
   };

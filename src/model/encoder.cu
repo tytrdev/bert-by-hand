@@ -30,26 +30,19 @@ void attention_block(Workspace &ws, const __half *hidden, const AttnWeights &w,
   const int rows = batch * SEQ_LEN;
   const int bheads = batch * NUM_HEADS;
 
-  linear(hidden, w.q_w, w.q_b, as_half(ws.q), rows, HIDDEN, HIDDEN);
-  linear(hidden, w.k_w, w.k_b, as_half(ws.k), rows, HIDDEN, HIDDEN);
-  linear(hidden, w.v_w, w.v_b, as_half(ws.v), rows, HIDDEN, HIDDEN);
+  // One fused projection produces Q | K | V stacked along the column dim; the
+  // attention kernels then read each slice straight out of this buffer.
+  const int qkv = 3 * HIDDEN;
+  linear(hidden, w.qkv_w, w.qkv_b, as_half(ws.qkv), rows, qkv, HIDDEN);
 
-  launch_split_heads(as_half(ws.q), as_half(ws.qh), SEQ_LEN, NUM_HEADS,
-                     HEAD_DIM, batch);
-  launch_split_heads(as_half(ws.k), as_half(ws.kh), SEQ_LEN, NUM_HEADS,
-                     HEAD_DIM, batch);
-  launch_split_heads(as_half(ws.v), as_half(ws.vh), SEQ_LEN, NUM_HEADS,
-                     HEAD_DIM, batch);
-
-  launch_attention_scores(as_half(ws.qh), as_half(ws.kh), as_half(ws.scores),
-                          bheads, SEQ_LEN, HEAD_DIM, scale);
+  launch_attention_scores(as_half(ws.qkv), as_half(ws.scores), batch, NUM_HEADS,
+                          SEQ_LEN, HEAD_DIM, qkv, 0 * HIDDEN, 1 * HIDDEN,
+                          scale);
   launch_softmax(as_half(ws.scores), bheads * SEQ_LEN, SEQ_LEN, mask,
                  NUM_HEADS * SEQ_LEN);
-
-  launch_attention_context(as_half(ws.scores), as_half(ws.vh), as_half(ws.ctx),
-                           bheads, SEQ_LEN, HEAD_DIM);
-  launch_merge_heads(as_half(ws.ctx), as_half(ws.merged), SEQ_LEN, NUM_HEADS,
-                     HEAD_DIM, batch);
+  launch_attention_context(as_half(ws.scores), as_half(ws.qkv),
+                           as_half(ws.merged), batch, NUM_HEADS, SEQ_LEN,
+                           HEAD_DIM, qkv, 2 * HIDDEN);
 
   linear(as_half(ws.merged), w.o_w, w.o_b, as_half(ws.attn_proj), rows, HIDDEN,
          HIDDEN);

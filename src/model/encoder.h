@@ -6,12 +6,11 @@
 struct Workspace;
 
 // Raw weight pointers for one self-attention sublayer, in device memory.
+// q/k/v are fused into one (3 * HIDDEN, HIDDEN) projection.
 struct AttnWeights {
-  const __half *q_w, *q_b;
-  const __half *k_w, *k_b;
-  const __half *v_w, *v_b;
-  const __half *o_w, *o_b;   // attention output dense
-  const __half *ln_w, *ln_b; // attention output LayerNorm
+  const __half *qkv_w, *qkv_b; // fused query/key/value projection
+  const __half *o_w, *o_b;     // attention output dense
+  const __half *ln_w, *ln_b;   // attention output LayerNorm
 };
 
 // Raw weight pointers for one feed forward sublayer, in device memory.
@@ -21,9 +20,9 @@ struct FfnWeights {
   const __half *ln_w, *ln_b;       // output LayerNorm
 };
 
-// One BERT self-attention block: projections, scaled dot product attention with
-// the padding mask, output projection, residual and LayerNorm. hidden and out
-// are (batch * SEQ_LEN, HIDDEN); mask is the (batch * SEQ_LEN,) attention mask.
+// One BERT self-attention block: fused QKV projection, scaled dot product
+// attention with the padding mask, output projection, residual and LayerNorm.
+// hidden and out are (batch * SEQ_LEN, HIDDEN).
 void attention_block(Workspace &ws, const __half *hidden, const AttnWeights &w,
                      const int32_t *mask, __half *out, int batch = 1);
 
@@ -39,6 +38,5 @@ struct LayerWeights {
 };
 
 // One full BERT encoder layer: self-attention block then feed forward block.
-// hidden and out are (batch * SEQ_LEN, HIDDEN); mask is (batch * SEQ_LEN,).
 void encoder_layer(Workspace &ws, const __half *hidden, const LayerWeights &w,
                    const int32_t *mask, __half *out, int batch = 1);
