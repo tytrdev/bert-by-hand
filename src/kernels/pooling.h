@@ -7,4 +7,4 @@
 // hidden is (seq, dim); out is (dim,). out[d] = sum_s mask[s] * h[s,d]
 // / sum_s mask[s], matching sentence-transformers mean pooling.
 void launch_mean_pool(const __half *hidden, const int32_t *mask, __half *out,
-                      int seq, int dim);
+                      int seq, int dim, int batch = 1);

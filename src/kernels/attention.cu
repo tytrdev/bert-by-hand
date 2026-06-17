@@ -11,22 +11,23 @@ constexpr int ATTN_BLOCK = 256;
 constexpr float MASK_NEG = -1e30f;
 constexpr int WM = 16, WN = 16, WK = 16;
 
-// (seq, heads * head_dim) -> (heads, seq, head_dim)
+// (batch * seq, heads * head_dim) -> (batch * heads, seq, head_dim)
 __global__ void split_heads_kernel(const __half *__restrict__ x,
-                                   __half *__restrict__ out, int seq, int heads,
-                                   int head_dim) {
+                                   __half *__restrict__ out, int batch, int seq,
+                                   int heads, int head_dim) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  int total = seq * heads * head_dim;
+  int total = batch * seq * heads * head_dim;
   if (idx >= total)
     return;
 
   int d = idx % head_dim;
   int h = (idx / head_dim) % heads;
-  int s = idx / (head_dim * heads);
+  int row = idx / (head_dim * heads); // token row = b * seq + s
+  int b = row / seq;
+  int s = row % seq;
 
-  int src = s * (heads * head_dim) + h * head_dim + d;
-  int dst = (h * seq + s) * head_dim + d;
-  out[dst] = x[src];
+  int dst = ((b * heads + h) * seq + s) * head_dim + d;
+  out[dst] = x[idx];
 }
 
 // scores[h, i, j] = scale * sum_d q[h, i, d] * k[h, j, d]
@@ -156,32 +157,33 @@ __global__ void attention_context_wmma_kernel(const __half *__restrict__ probs,
   }
 }
 
-// (heads, seq, head_dim) -> (seq, heads * head_dim)
+// (batch * heads, seq, head_dim) -> (batch * seq, heads * head_dim)
 __global__ void merge_heads_kernel(const __half *__restrict__ x,
-                                   __half *__restrict__ out, int seq, int heads,
-                                   int head_dim) {
+                                   __half *__restrict__ out, int batch, int seq,
+                                   int heads, int head_dim) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  int total = seq * heads * head_dim;
+  int total = batch * seq * heads * head_dim;
   if (idx >= total)
     return;
 
   int d = idx % head_dim;
   int h = (idx / head_dim) % heads;
-  int s = idx / (head_dim * heads);
+  int row = idx / (head_dim * heads); // token row = b * seq + s
+  int b = row / seq;
+  int s = row % seq;
 
-  int src = (h * seq + s) * head_dim + d;
-  int dst = s * (heads * head_dim) + h * head_dim + d;
-  out[dst] = x[src];
+  int src = ((b * heads + h) * seq + s) * head_dim + d;
+  out[idx] = x[src];
 }
 
 } // namespace
 
 void launch_split_heads(const __half *x, __half *out, int seq, int heads,
-                        int head_dim) {
-  int total = seq * heads * head_dim;
+                        int head_dim, int batch) {
+  int total = batch * seq * heads * head_dim;
   dim3 block(ATTN_BLOCK);
   dim3 grid((total + ATTN_BLOCK - 1) / ATTN_BLOCK);
-  split_heads_kernel<<<grid, block>>>(x, out, seq, heads, head_dim);
+  split_heads_kernel<<<grid, block>>>(x, out, batch, seq, heads, head_dim);
   CUDA_CHECK_KERNEL();
 }
 
@@ -230,10 +232,10 @@ void launch_attention_context(const __half *probs, const __half *v, __half *ctx,
 }
 
 void launch_merge_heads(const __half *x, __half *out, int seq, int heads,
-                        int head_dim) {
-  int total = seq * heads * head_dim;
+                        int head_dim, int batch) {
+  int total = batch * seq * heads * head_dim;
   dim3 block(ATTN_BLOCK);
   dim3 grid((total + ATTN_BLOCK - 1) / ATTN_BLOCK);
-  merge_heads_kernel<<<grid, block>>>(x, out, seq, heads, head_dim);
+  merge_heads_kernel<<<grid, block>>>(x, out, batch, seq, heads, head_dim);
   CUDA_CHECK_KERNEL();
 }

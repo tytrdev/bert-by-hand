@@ -6,14 +6,15 @@ namespace {
 constexpr int NORM_BLOCK = 256;
 constexpr float NORM_FLOOR = 1e-12f;
 
-// Single block normalizes the whole vector.
+// One block normalizes one row of length n; grid covers the batch.
 __global__ void l2_normalize_kernel(__half *__restrict__ x, int n) {
   int tid = threadIdx.x;
+  __half *row = x + size_t(blockIdx.x) * n;
   __shared__ float sdata[NORM_BLOCK];
 
   float sq = 0.0f;
   for (int i = tid; i < n; i += NORM_BLOCK) {
-    float v = __half2float(x[i]);
+    float v = __half2float(row[i]);
     sq += v * v;
   }
   sdata[tid] = sq;
@@ -28,12 +29,12 @@ __global__ void l2_normalize_kernel(__half *__restrict__ x, int n) {
   float norm = sqrtf(sdata[0]);
   float inv = 1.0f / fmaxf(norm, NORM_FLOOR);
   for (int i = tid; i < n; i += NORM_BLOCK)
-    x[i] = __float2half(__half2float(x[i]) * inv);
+    row[i] = __float2half(__half2float(row[i]) * inv);
 }
 
 } // namespace
 
-void launch_l2_normalize(__half *x, int n) {
-  l2_normalize_kernel<<<1, NORM_BLOCK>>>(x, n);
+void launch_l2_normalize(__half *x, int n, int batch) {
+  l2_normalize_kernel<<<batch, NORM_BLOCK>>>(x, n);
   CUDA_CHECK_KERNEL();
 }

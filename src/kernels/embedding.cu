@@ -10,21 +10,22 @@ __global__ void embedding_kernel(const int32_t *__restrict__ input_ids,
                                  const __half *__restrict__ word_emb,
                                  const __half *__restrict__ pos_emb,
                                  const __half *__restrict__ type_emb,
-                                 __half *__restrict__ out, int seq_len,
-                                 int hidden) {
+                                 __half *__restrict__ out, int batch,
+                                 int seq_len, int hidden) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  int total = seq_len * hidden;
+  int total = batch * seq_len * hidden;
   if (idx >= total)
     return;
 
-  int s = idx / hidden;
+  int row = idx / hidden; // token index across the batch
   int h = idx % hidden;
+  int pos = row % seq_len; // position resets each sequence
 
-  int wid = input_ids[s];
-  int tid = token_type_ids[s];
+  int wid = input_ids[row];
+  int tid = token_type_ids[row];
 
   float w = __half2float(word_emb[size_t(wid) * hidden + h]);
-  float p = __half2float(pos_emb[size_t(s) * hidden + h]);
+  float p = __half2float(pos_emb[size_t(pos) * hidden + h]);
   float t = __half2float(type_emb[size_t(tid) * hidden + h]);
   out[idx] = __float2half(w + p + t);
 }
@@ -34,11 +35,12 @@ __global__ void embedding_kernel(const int32_t *__restrict__ input_ids,
 void launch_embedding(const int32_t *input_ids, const int32_t *token_type_ids,
                       const __half *word_emb, const __half *pos_emb,
                       const __half *type_emb, __half *out, int seq_len,
-                      int hidden) {
-  int total = seq_len * hidden;
+                      int hidden, int batch) {
+  int total = batch * seq_len * hidden;
   dim3 block(EMB_BLOCK);
   dim3 grid((total + EMB_BLOCK - 1) / EMB_BLOCK);
   embedding_kernel<<<grid, block>>>(input_ids, token_type_ids, word_emb,
-                                    pos_emb, type_emb, out, seq_len, hidden);
+                                    pos_emb, type_emb, out, batch, seq_len,
+                                    hidden);
   CUDA_CHECK_KERNEL();
 }
