@@ -41,8 +41,7 @@ void attention_block(Workspace &ws, const __half *hidden, const AttnWeights &w,
 
   launch_attention_scores(as_half(ws.qh), as_half(ws.kh), as_half(ws.scores),
                           NUM_HEADS, SEQ_LEN, HEAD_DIM, scale);
-  launch_mask_scores(as_half(ws.scores), mask, NUM_HEADS, SEQ_LEN);
-  launch_softmax(as_half(ws.scores), NUM_HEADS * SEQ_LEN, SEQ_LEN);
+  launch_softmax(as_half(ws.scores), NUM_HEADS * SEQ_LEN, SEQ_LEN, mask);
 
   launch_attention_context(as_half(ws.scores), as_half(ws.vh), as_half(ws.ctx),
                            NUM_HEADS, SEQ_LEN, HEAD_DIM);

@@ -1,5 +1,6 @@
 #include "core/cuda_check.h"
 #include "kernels/softmax.h"
+#include <cstdint>
 
 namespace {
 
@@ -20,7 +21,10 @@ __inline__ __device__ float warp_sum(float v) {
 
 // One warp per row. Rows here are at most a few hundred wide, so a warp with
 // shuffle reductions beats a full block with shared memory and __syncthreads.
-__global__ void softmax_kernel(__half *__restrict__ x, int M, int N) {
+// When mask != nullptr, column j with mask[j] == 0 is dropped (padding key),
+// folding the attention mask into the same pass.
+__global__ void softmax_kernel(__half *__restrict__ x, int M, int N,
+                               const int32_t *__restrict__ mask) {
   int row = (blockIdx.x * blockDim.x + threadIdx.x) / WARP;
   if (row >= M)
     return;
@@ -28,24 +32,34 @@ __global__ void softmax_kernel(__half *__restrict__ x, int M, int N) {
   __half *r = x + size_t(row) * N;
 
   float m = -1e30f;
-  for (int i = lane; i < N; i += WARP)
+  for (int i = lane; i < N; i += WARP) {
+    if (mask && mask[i] == 0)
+      continue;
     m = fmaxf(m, __half2float(r[i]));
+  }
   m = warp_max(m);
 
   float sum = 0.0f;
-  for (int i = lane; i < N; i += WARP)
+  for (int i = lane; i < N; i += WARP) {
+    if (mask && mask[i] == 0)
+      continue;
     sum += expf(__half2float(r[i]) - m);
+  }
   float inv = 1.0f / warp_sum(sum);
 
-  for (int i = lane; i < N; i += WARP)
-    r[i] = __float2half(expf(__half2float(r[i]) - m) * inv);
+  for (int i = lane; i < N; i += WARP) {
+    if (mask && mask[i] == 0)
+      r[i] = __float2half(0.0f);
+    else
+      r[i] = __float2half(expf(__half2float(r[i]) - m) * inv);
+  }
 }
 
 } // namespace
 
-void launch_softmax(__half *x, int M, int N) {
+void launch_softmax(__half *x, int M, int N, const int32_t *mask) {
   int threads = WARPS_PER_BLOCK * WARP;
   int blocks = (M + WARPS_PER_BLOCK - 1) / WARPS_PER_BLOCK;
-  softmax_kernel<<<blocks, threads>>>(x, M, N);
+  softmax_kernel<<<blocks, threads>>>(x, M, N, mask);
   CUDA_CHECK_KERNEL();
 }
