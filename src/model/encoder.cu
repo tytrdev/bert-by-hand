@@ -1,7 +1,6 @@
 #include "core/device_buffer.h"
 #include "core/model_config.h"
 #include "kernels/attention.h"
-#include "kernels/gelu.h"
 #include "kernels/layernorm.h"
 #include "kernels/matmul.h"
 #include "kernels/softmax.h"
@@ -55,9 +54,8 @@ void ffn_block(Workspace &ws, const __half *hidden, const FfnWeights &w,
   using namespace model;
   const int rows = batch * SEQ_LEN;
 
-  linear(hidden, w.inter_w, w.inter_b, as_half(ws.inter), rows, FFN_DIM,
-         HIDDEN);
-  launch_gelu(as_half(ws.inter), rows * FFN_DIM);
+  launch_matmul(hidden, w.inter_w, as_half(ws.inter), rows, FFN_DIM, HIDDEN,
+                w.inter_b, /*gelu=*/true);
 
   linear(as_half(ws.inter), w.out_w, w.out_b, as_half(ws.ffn_proj), rows,
          HIDDEN, FFN_DIM);

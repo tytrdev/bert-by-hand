@@ -7,6 +7,7 @@
 
 #include <cuda_fp16.h>
 
-// C = A @ B^T (+ bias broadcast over rows, when bias != nullptr).
+// C = A @ B^T (+ bias broadcast over rows, when bias != nullptr). When gelu is
+// true, the exact gelu activation is applied in the epilogue.
 void launch_matmul(const __half *A, const __half *B, __half *C, int M, int N,
-                   int K, const __half *bias = nullptr);
+                   int K, const __half *bias = nullptr, bool gelu = false);
