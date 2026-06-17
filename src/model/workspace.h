@@ -20,11 +20,12 @@ struct Workspace {
   DeviceBuffer summed, ping, pong; // embeddings and layer ping-pong
 };
 
-inline Workspace make_workspace() {
+inline Workspace make_workspace(int batch = 1) {
   using namespace model;
-  const size_t mat = size_t(SEQ_LEN) * HIDDEN * sizeof(__half);
-  const size_t scores = size_t(NUM_HEADS) * SEQ_LEN * SEQ_LEN * sizeof(__half);
-  const size_t inter = size_t(SEQ_LEN) * FFN_DIM * sizeof(__half);
+  const size_t mat = size_t(batch) * SEQ_LEN * HIDDEN * sizeof(__half);
+  const size_t scores =
+      size_t(batch) * NUM_HEADS * SEQ_LEN * SEQ_LEN * sizeof(__half);
+  const size_t inter = size_t(batch) * SEQ_LEN * FFN_DIM * sizeof(__half);
   return {
       DeviceBuffer(mat),    DeviceBuffer(mat),   DeviceBuffer(mat),
       DeviceBuffer(mat),    DeviceBuffer(mat),   DeviceBuffer(mat),

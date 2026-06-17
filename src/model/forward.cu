@@ -19,20 +19,21 @@ inline __half *as_half(DeviceBuffer &b) {
 
 void bert_encode(Workspace &ws, const ModelWeights &w, const int32_t *input_ids,
                  const int32_t *token_type_ids, const int32_t *mask,
-                 __half *out) {
+                 __half *out, int batch) {
   using namespace model;
   using detail::h;
-  const size_t mat = size_t(SEQ_LEN) * HIDDEN;
+  const int rows = batch * SEQ_LEN;
+  const size_t mat = size_t(rows) * HIDDEN;
 
   launch_embedding(input_ids, token_type_ids, h(w.word_emb), h(w.pos_emb),
-                   h(w.type_emb), as_half(ws.summed), SEQ_LEN, HIDDEN);
+                   h(w.type_emb), as_half(ws.summed), SEQ_LEN, HIDDEN, batch);
   launch_layernorm(as_half(ws.summed), h(w.emb_ln_w), h(w.emb_ln_b),
-                   as_half(ws.ping), SEQ_LEN, HIDDEN, LAYER_NORM_EPS);
+                   as_half(ws.ping), rows, HIDDEN, LAYER_NORM_EPS);
 
   __half *cur = as_half(ws.ping);
   __half *nxt = as_half(ws.pong);
   for (int i = 0; i < NUM_LAYERS; i++) {
-    encoder_layer(ws, cur, w.layer(i), mask, nxt);
+    encoder_layer(ws, cur, w.layer(i), mask, nxt, batch);
     std::swap(cur, nxt);
   }
 
@@ -42,10 +43,12 @@ void bert_encode(Workspace &ws, const ModelWeights &w, const int32_t *input_ids,
 
 void bert_embed(Workspace &ws, const ModelWeights &w, const int32_t *input_ids,
                 const int32_t *token_type_ids, const int32_t *mask,
-                __half *embedding) {
+                __half *embedding, int batch) {
   using namespace model;
 
-  bert_encode(ws, w, input_ids, token_type_ids, mask, as_half(ws.attn_out));
-  launch_mean_pool(as_half(ws.attn_out), mask, embedding, SEQ_LEN, HIDDEN);
-  launch_l2_normalize(embedding, HIDDEN);
+  bert_encode(ws, w, input_ids, token_type_ids, mask, as_half(ws.attn_out),
+              batch);
+  launch_mean_pool(as_half(ws.attn_out), mask, embedding, SEQ_LEN, HIDDEN,
+                   batch);
+  launch_l2_normalize(embedding, HIDDEN, batch);
 }

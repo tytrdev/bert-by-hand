@@ -22,15 +22,15 @@ struct FfnWeights {
 };
 
 // One BERT self-attention block: projections, scaled dot product attention with
-// the padding mask, output projection, residual and LayerNorm.
-// hidden and out are (SEQ_LEN, HIDDEN); mask is the (SEQ_LEN,) attention mask.
+// the padding mask, output projection, residual and LayerNorm. hidden and out
+// are (batch * SEQ_LEN, HIDDEN); mask is the (batch * SEQ_LEN,) attention mask.
 void attention_block(Workspace &ws, const __half *hidden, const AttnWeights &w,
-                     const int32_t *mask, __half *out);
+                     const int32_t *mask, __half *out, int batch = 1);
 
 // One BERT feed forward block: intermediate dense, gelu, output dense, residual
-// and LayerNorm. hidden and out are (SEQ_LEN, HIDDEN).
+// and LayerNorm. hidden and out are (batch * SEQ_LEN, HIDDEN).
 void ffn_block(Workspace &ws, const __half *hidden, const FfnWeights &w,
-               __half *out);
+               __half *out, int batch = 1);
 
 // All weights for one encoder layer.
 struct LayerWeights {
@@ -39,6 +39,6 @@ struct LayerWeights {
 };
 
 // One full BERT encoder layer: self-attention block then feed forward block.
-// hidden and out are (SEQ_LEN, HIDDEN); mask is the (SEQ_LEN,) attention mask.
+// hidden and out are (batch * SEQ_LEN, HIDDEN); mask is (batch * SEQ_LEN,).
 void encoder_layer(Workspace &ws, const __half *hidden, const LayerWeights &w,
-                   const int32_t *mask, __half *out);
+                   const int32_t *mask, __half *out, int batch = 1);
