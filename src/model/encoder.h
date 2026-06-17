@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/model_config.h"
 #include <cstdint>
 #include <cuda_fp16.h>
 
@@ -20,16 +21,17 @@ struct FfnWeights {
   const __half *ln_w, *ln_b;       // output LayerNorm
 };
 
-// One BERT self-attention block: fused QKV projection, scaled dot product
-// attention with the padding mask, output projection, residual and LayerNorm.
-// hidden and out are (batch * SEQ_LEN, HIDDEN).
+// One BERT self-attention block: projections, scaled dot product attention with
+// the padding mask, output projection, residual and LayerNorm. hidden and out
+// are (batch * SEQ_LEN, HIDDEN); mask is the (batch * SEQ_LEN,) attention mask.
 void attention_block(Workspace &ws, const __half *hidden, const AttnWeights &w,
-                     const int32_t *mask, __half *out, int batch = 1);
+                     const int32_t *mask, __half *out, int batch = 1,
+                     int seq = model::SEQ_LEN);
 
 // One BERT feed forward block: intermediate dense, gelu, output dense, residual
 // and LayerNorm. hidden and out are (batch * SEQ_LEN, HIDDEN).
 void ffn_block(Workspace &ws, const __half *hidden, const FfnWeights &w,
-               __half *out, int batch = 1);
+               __half *out, int batch = 1, int seq = model::SEQ_LEN);
 
 // All weights for one encoder layer.
 struct LayerWeights {
@@ -38,5 +40,7 @@ struct LayerWeights {
 };
 
 // One full BERT encoder layer: self-attention block then feed forward block.
+// hidden and out are (batch * SEQ_LEN, HIDDEN); mask is (batch * SEQ_LEN,).
 void encoder_layer(Workspace &ws, const __half *hidden, const LayerWeights &w,
-                   const int32_t *mask, __half *out, int batch = 1);
+                   const int32_t *mask, __half *out, int batch = 1,
+                   int seq = model::SEQ_LEN);

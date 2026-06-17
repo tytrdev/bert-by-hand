@@ -10,10 +10,10 @@
 // (batch * SEQ_LEN,).
 void bert_encode(Workspace &ws, const ModelWeights &w, const int32_t *input_ids,
                  const int32_t *token_type_ids, const int32_t *mask,
-                 __half *out, int batch = 1);
+                 __half *out, int batch = 1, int seq = model::SEQ_LEN);
 
 // Full sentence embedding: encode, masked mean pool, L2 normalize.
 // embedding is (batch, HIDDEN).
 void bert_embed(Workspace &ws, const ModelWeights &w, const int32_t *input_ids,
                 const int32_t *token_type_ids, const int32_t *mask,
-                __half *embedding, int batch = 1);
+                __half *embedding, int batch = 1, int seq = model::SEQ_LEN);
