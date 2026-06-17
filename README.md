@@ -15,6 +15,10 @@ cmake -S . -B build && cmake --build build -j
 ctest --test-dir build                         # every kernel parity-checked vs torch
 ./build/bench                                  # ours, full + effective length
 uv run python scripts/benchmark_varlen.py      # pytorch length sweep
+
+uv run python scripts/dump_corpus.py           # tokenize 2000 STS sentences + torch refs
+./build/corpus                                 # ours, real corpus throughput + correctness
+uv run python scripts/benchmark_corpus.py      # pytorch, same corpus
 ```
 
 fp16 weights, fp32 reference. Every kernel has a parity test; end-to-end cosine
@@ -29,6 +33,16 @@ vs the torch embedding is 0.9999.
 | 9 (pytorch tightest) | — (16 floor) | 0.023           |
 
 Parity where compute dominates; a real win where per-forward overhead dominates.
+
+Over 2000 real sentences (STS benchmark, varied length), forward only, each
+batch padded to its longest like sentence-transformers does. Mean cosine vs the
+torch embedding is 1.00000.
+
+| approach                  | throughput     |
+| ------------------------- | -------------- |
+| ours, padded to 128       | 11,300 sent/s  |
+| ours, dynamic length      | **54,000 sent/s** |
+| pytorch, dynamic length   | 39,000 sent/s  |
 
 ## How (each step is one commit; batch-64 ms/sent)
 
