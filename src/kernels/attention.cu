@@ -123,6 +123,39 @@ __global__ void attention_context_kernel(const __half *__restrict__ probs,
   ctx[idx] = __float2half(acc);
 }
 
+// Tensor core context: per head, ctx_h = probs_h @ V_h. probs_h is (seq, seq)
+// row major, V_h is (seq, head_dim) row major, both feed wmma directly (B is
+// row major here, unlike the score matmul). One warp per 16x16 ctx tile.
+__global__ void attention_context_wmma_kernel(const __half *__restrict__ probs,
+                                              const __half *__restrict__ v,
+                                              __half *__restrict__ ctx, int seq,
+                                              int head_dim) {
+  int h = blockIdx.z;
+  int row = blockIdx.y * WM;
+  int col = blockIdx.x * WN;
+  const __half *probs_h = probs + size_t(h) * seq * seq;
+  const __half *v_h = v + size_t(h) * seq * head_dim;
+
+  wmma::fragment<wmma::matrix_a, WM, WN, WK, __half, wmma::row_major> a_frag;
+  wmma::fragment<wmma::matrix_b, WM, WN, WK, __half, wmma::row_major> b_frag;
+  wmma::fragment<wmma::accumulator, WM, WN, WK, float> c_frag;
+  wmma::fill_fragment(c_frag, 0.0f);
+
+  for (int k0 = 0; k0 < seq; k0 += WK) {
+    wmma::load_matrix_sync(a_frag, probs_h + row * seq + k0, seq);
+    wmma::load_matrix_sync(b_frag, v_h + k0 * head_dim + col, head_dim);
+    wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
+  }
+
+  __shared__ float tile[WM * WN];
+  wmma::store_matrix_sync(tile, c_frag, WN, wmma::mem_row_major);
+  __half *ctx_h = ctx + size_t(h) * seq * head_dim;
+  for (int i = threadIdx.x; i < WM * WN; i += warpSize) {
+    int r = i / WN, c = i % WN;
+    ctx_h[(row + r) * head_dim + col + c] = __float2half(tile[i]);
+  }
+}
+
 // (heads, seq, head_dim) -> (seq, heads * head_dim)
 __global__ void merge_heads_kernel(const __half *__restrict__ x,
                                    __half *__restrict__ out, int seq, int heads,
@@ -181,6 +214,13 @@ void launch_mask_scores(__half *scores, const int32_t *mask, int heads,
 
 void launch_attention_context(const __half *probs, const __half *v, __half *ctx,
                               int heads, int seq, int head_dim) {
+  if (seq % WK == 0 && head_dim % WN == 0) {
+    dim3 grid(head_dim / WN, seq / WM, heads);
+    attention_context_wmma_kernel<<<grid, 32>>>(probs, v, ctx, seq, head_dim);
+    CUDA_CHECK_KERNEL();
+    return;
+  }
+
   int total = heads * seq * head_dim;
   dim3 block(ATTN_BLOCK);
   dim3 grid((total + ATTN_BLOCK - 1) / ATTN_BLOCK);
