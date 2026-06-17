@@ -8,38 +8,55 @@ using namespace nvcuda;
 
 constexpr int WM = 16, WN = 16, WK = 16;
 
+constexpr int WST = 2; // attention warp tile, in 16x16 fragments (per axis)
+
 // Scores read Q and K straight out of the fused QKV buffer with a strided wmma
-// load (ld = qkv_stride, column q_off/k_off), so no separate split-heads pass
-// is needed. blockIdx.z is the global head b * heads + h; scores is
-// (batch * heads, seq, seq).
+// load (ld = qkv_stride). Each warp computes a TW*16 x TW*16 tile (TW fragments
+// per axis, held in registers) to reuse the Q/K loads. blockIdx.z is the global
+// head b * heads + h; scores is (batch * heads, seq, seq).
+template <int TW>
 __global__ void attention_scores_kernel(const __half *__restrict__ qkv,
                                         __half *__restrict__ scores, int heads,
                                         int seq, int head_dim, int qkv_stride,
                                         int q_off, int k_off, float scale) {
   int z = blockIdx.z;
   int b = z / heads, hl = z % heads;
-  int row = blockIdx.y * WM, col = blockIdx.x * WN;
+  int row = blockIdx.y * TW * 16, col = blockIdx.x * TW * 16;
   const __half *q =
       qkv + (size_t(b) * seq) * qkv_stride + q_off + hl * head_dim;
   const __half *k =
       qkv + (size_t(b) * seq) * qkv_stride + k_off + hl * head_dim;
 
-  wmma::fragment<wmma::matrix_a, WM, WN, WK, __half, wmma::row_major> af;
-  wmma::fragment<wmma::matrix_b, WM, WN, WK, __half, wmma::col_major> bf;
-  wmma::fragment<wmma::accumulator, WM, WN, WK, float> cf;
-  wmma::fill_fragment(cf, 0.0f);
+  wmma::fragment<wmma::matrix_a, WM, WN, WK, __half, wmma::row_major> af[TW];
+  wmma::fragment<wmma::matrix_b, WM, WN, WK, __half, wmma::col_major> bf[TW];
+  wmma::fragment<wmma::accumulator, WM, WN, WK, float> c[TW][TW];
+  for (int i = 0; i < TW; i++)
+    for (int j = 0; j < TW; j++)
+      wmma::fill_fragment(c[i][j], 0.0f);
+
   for (int d0 = 0; d0 < head_dim; d0 += WK) {
-    wmma::load_matrix_sync(af, q + row * qkv_stride + d0, qkv_stride);
-    wmma::load_matrix_sync(bf, k + col * qkv_stride + d0, qkv_stride);
-    wmma::mma_sync(cf, af, bf, cf);
+    for (int i = 0; i < TW; i++)
+      wmma::load_matrix_sync(af[i], q + (row + i * 16) * qkv_stride + d0,
+                             qkv_stride);
+    for (int j = 0; j < TW; j++)
+      wmma::load_matrix_sync(bf[j], k + (col + j * 16) * qkv_stride + d0,
+                             qkv_stride);
+    for (int i = 0; i < TW; i++)
+      for (int j = 0; j < TW; j++)
+        wmma::mma_sync(c[i][j], af[i], bf[j], c[i][j]);
   }
 
   __shared__ float tile[WM * WN];
-  wmma::store_matrix_sync(tile, cf, WN, wmma::mem_row_major);
   __half *scores_h = scores + size_t(z) * seq * seq;
-  for (int i = threadIdx.x; i < WM * WN; i += warpSize)
-    scores_h[(row + i / WN) * seq + col + i % WN] =
-        __float2half(tile[i] * scale);
+  for (int i = 0; i < TW; i++)
+    for (int j = 0; j < TW; j++) {
+      wmma::store_matrix_sync(tile, c[i][j], WN, wmma::mem_row_major);
+      __syncwarp();
+      for (int l = threadIdx.x; l < WM * WN; l += warpSize)
+        scores_h[(row + i * 16 + l / WN) * seq + col + j * 16 + l % WN] =
+            __float2half(tile[l] * scale);
+      __syncwarp();
+    }
 }
 
 // Context = probs @ V. V is read from the fused QKV buffer (column v_off); the
@@ -80,9 +97,17 @@ __global__ void attention_context_kernel(const __half *__restrict__ probs,
 void launch_attention_scores(const __half *qkv, __half *scores, int batch,
                              int heads, int seq, int head_dim, int qkv_stride,
                              int q_off, int k_off, float scale) {
-  dim3 grid(seq / WN, seq / WM, batch * heads);
-  attention_scores_kernel<<<grid, 32>>>(qkv, scores, heads, seq, head_dim,
-                                        qkv_stride, q_off, k_off, scale);
+  // 32x32 warp tile when seq allows it, else a 16x16 tile so short effective
+  // sequences (multiples of 16) still work.
+  if (seq % (WST * 16) == 0) {
+    dim3 grid(seq / (WST * 16), seq / (WST * 16), batch * heads);
+    attention_scores_kernel<WST><<<grid, 32>>>(
+        qkv, scores, heads, seq, head_dim, qkv_stride, q_off, k_off, scale);
+  } else {
+    dim3 grid(seq / 16, seq / 16, batch * heads);
+    attention_scores_kernel<1><<<grid, 32>>>(qkv, scores, heads, seq, head_dim,
+                                             qkv_stride, q_off, k_off, scale);
+  }
   CUDA_CHECK_KERNEL();
 }
 
