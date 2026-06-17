@@ -73,8 +73,8 @@ __global__ void matmul_wmma_kernel(const __half *A, const __half *B, __half *C,
   wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, __half,
                  wmma::col_major>
       b_frag;
-  wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> c_frag;
-  wmma::fill_fragment(c_frag, 0.0f);
+  wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, __half> c_frag;
+  wmma::fill_fragment(c_frag, __float2half(0.0f));
 
   for (int k0 = 0; k0 < K; k0 += WMMA_K) {
     wmma::load_matrix_sync(a_frag, A + tile_row * K + k0, K);
@@ -82,21 +82,24 @@ __global__ void matmul_wmma_kernel(const __half *A, const __half *B, __half *C,
     wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
   }
 
-  __shared__ float tile[WMMA_M * WMMA_N];
+  __shared__ __half tile[WMMA_M * WMMA_N];
   wmma::store_matrix_sync(tile, c_frag, WMMA_N, wmma::mem_row_major);
   for (int i = threadIdx.x; i < WMMA_M * WMMA_N; i += warpSize) {
     int r = i / WMMA_N, c = i % WMMA_N;
     C[(tile_row + r) * N + tile_col + c] =
-        __float2half(epilogue(tile[i], bias, tile_col + c, gelu));
+        __float2half(epilogue(__half2float(tile[i]), bias, tile_col + c, gelu));
   }
 }
 
 __global__ void matmul_pipe_kernel(const __half *A, const __half *B, __half *C,
                                    int M, int N, int K, const __half *bias,
                                    bool gelu) {
+  // fp16 accumulate: GeForce runs fp16->fp16 tensor ops at twice the rate of
+  // fp16->fp32. Six encoder layers tolerate the reduced precision (parity at
+  // cos 0.999); the bias/gelu epilogue still runs in fp32.
   __shared__ __half As[2][PBM * PBK];
   __shared__ __half Bs[2][PBN * PBK];
-  __shared__ float ts[PNW][256];
+  __shared__ __half ts[PNW][256];
 
   int bm = blockIdx.y * PBM, bn = blockIdx.x * PBN;
   int tid = threadIdx.x, warp = tid / 32, lane = tid % 32;
@@ -104,10 +107,10 @@ __global__ void matmul_pipe_kernel(const __half *A, const __half *B, __half *C,
 
   wmma::fragment<wmma::matrix_a, 16, 16, 16, __half, wmma::row_major> a[PWTM];
   wmma::fragment<wmma::matrix_b, 16, 16, 16, __half, wmma::col_major> b[PWTN];
-  wmma::fragment<wmma::accumulator, 16, 16, 16, float> c[PWTM][PWTN];
+  wmma::fragment<wmma::accumulator, 16, 16, 16, __half> c[PWTM][PWTN];
   for (int i = 0; i < PWTM; i++)
     for (int j = 0; j < PWTN; j++)
-      wmma::fill_fragment(c[i][j], 0.f);
+      wmma::fill_fragment(c[i][j], __float2half(0.f));
 
   auto load = [&](int st, int k0) {
     for (int i = tid * 8; i < PBM * PBK; i += blockDim.x * 8)
@@ -149,7 +152,8 @@ __global__ void matmul_pipe_kernel(const __half *A, const __half *B, __half *C,
       for (int l = lane; l < 256; l += 32) {
         int gr = bm + wm * PWTM * 16 + i * 16 + l / 16;
         int gc = bn + wn * PWTN * 16 + j * 16 + l % 16;
-        C[gr * N + gc] = __float2half(epilogue(ts[warp][l], bias, gc, gelu));
+        C[gr * N + gc] =
+            __float2half(epilogue(__half2float(ts[warp][l]), bias, gc, gelu));
       }
       __syncwarp();
     }

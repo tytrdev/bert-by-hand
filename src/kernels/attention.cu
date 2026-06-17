@@ -29,10 +29,10 @@ __global__ void attention_scores_kernel(const __half *__restrict__ qkv,
 
   wmma::fragment<wmma::matrix_a, WM, WN, WK, __half, wmma::row_major> af[TW];
   wmma::fragment<wmma::matrix_b, WM, WN, WK, __half, wmma::col_major> bf[TW];
-  wmma::fragment<wmma::accumulator, WM, WN, WK, float> c[TW][TW];
+  wmma::fragment<wmma::accumulator, WM, WN, WK, __half> c[TW][TW];
   for (int i = 0; i < TW; i++)
     for (int j = 0; j < TW; j++)
-      wmma::fill_fragment(c[i][j], 0.0f);
+      wmma::fill_fragment(c[i][j], __float2half(0.0f));
 
   for (int d0 = 0; d0 < head_dim; d0 += WK) {
     for (int i = 0; i < TW; i++)
@@ -46,7 +46,7 @@ __global__ void attention_scores_kernel(const __half *__restrict__ qkv,
         wmma::mma_sync(c[i][j], af[i], bf[j], c[i][j]);
   }
 
-  __shared__ float tile[WM * WN];
+  __shared__ __half tile[WM * WN];
   __half *scores_h = scores + size_t(z) * seq * seq;
   for (int i = 0; i < TW; i++)
     for (int j = 0; j < TW; j++) {
@@ -54,7 +54,7 @@ __global__ void attention_scores_kernel(const __half *__restrict__ qkv,
       __syncwarp();
       for (int l = threadIdx.x; l < WM * WN; l += warpSize)
         scores_h[(row + i * 16 + l / WN) * seq + col + j * 16 + l % WN] =
-            __float2half(tile[l] * scale);
+            __float2half(__half2float(tile[l]) * scale);
       __syncwarp();
     }
 }
@@ -76,8 +76,8 @@ __global__ void attention_context_kernel(const __half *__restrict__ probs,
 
   wmma::fragment<wmma::matrix_a, WM, WN, WK, __half, wmma::row_major> af;
   wmma::fragment<wmma::matrix_b, WM, WN, WK, __half, wmma::row_major> bf;
-  wmma::fragment<wmma::accumulator, WM, WN, WK, float> cf;
-  wmma::fill_fragment(cf, 0.0f);
+  wmma::fragment<wmma::accumulator, WM, WN, WK, __half> cf;
+  wmma::fill_fragment(cf, __float2half(0.0f));
   for (int k0 = 0; k0 < seq; k0 += WK) {
     wmma::load_matrix_sync(af, probs_h + row * seq + k0, seq);
     wmma::load_matrix_sync(bf, v + k0 * qkv_stride + col, qkv_stride);
@@ -86,10 +86,10 @@ __global__ void attention_context_kernel(const __half *__restrict__ probs,
 
   int out_stride = heads * head_dim;
   __half *out = merged + (size_t(b) * seq) * out_stride + hl * head_dim;
-  __shared__ float tile[WM * WN];
+  __shared__ __half tile[WM * WN];
   wmma::store_matrix_sync(tile, cf, WN, wmma::mem_row_major);
   for (int i = threadIdx.x; i < WM * WN; i += warpSize)
-    out[(row + i / WN) * out_stride + col + i % WN] = __float2half(tile[i]);
+    out[(row + i / WN) * out_stride + col + i % WN] = tile[i];
 }
 
 } // namespace
