@@ -3,75 +3,58 @@
 
 namespace {
 
-constexpr int LN_BLOCK = 256;
+constexpr int WARP = 32;
+constexpr int WARPS_PER_BLOCK = 8;
 
-// When residual != nullptr the layernorm input is (x + residual), folding the
-// residual add into this kernel so it is not a separate global pass.
-__global__ void layernorm_naive_kernel(const __half *__restrict__ x,
-                                       const __half *__restrict__ residual,
-                                       const __half *__restrict__ gamma,
-                                       const __half *__restrict__ beta,
-                                       __half *__restrict__ y, int M, int D,
-                                       float eps) {
-  int row = blockIdx.x;
+__inline__ __device__ float warp_sum(float v) {
+  for (int o = WARP / 2; o > 0; o >>= 1)
+    v += __shfl_xor_sync(0xffffffff, v, o);
+  return v;
+}
+
+// One warp per row. When residual != nullptr the layernorm input is
+// (x + residual), folding the residual add into this kernel.
+__global__ void layernorm_kernel(const __half *__restrict__ x,
+                                 const __half *__restrict__ residual,
+                                 const __half *__restrict__ gamma,
+                                 const __half *__restrict__ beta,
+                                 __half *__restrict__ y, int M, int D,
+                                 float eps) {
+  int row = (blockIdx.x * blockDim.x + threadIdx.x) / WARP;
   if (row >= M)
     return;
-  int tid = threadIdx.x;
+  int lane = threadIdx.x % WARP;
 
   const __half *x_row = x + size_t(row) * D;
   const __half *res_row = residual ? residual + size_t(row) * D : nullptr;
   __half *y_row = y + size_t(row) * D;
 
-  __shared__ float sdata[LN_BLOCK];
-
-  // sum for mean
   float sum = 0.0f;
-  for (int i = tid; i < D; i += LN_BLOCK) {
+  for (int i = lane; i < D; i += WARP) {
     float v = __half2float(x_row[i]);
     if (res_row)
       v += __half2float(res_row[i]);
     sum += v;
   }
-  sdata[tid] = sum;
-  __syncthreads();
+  float mean = warp_sum(sum) / float(D);
 
-  for (int s = LN_BLOCK / 2; s > 0; s >>= 1) {
-    if (tid < s)
-      sdata[tid] += sdata[tid + s];
-    __syncthreads();
-  }
-  float mean = sdata[0] / float(D);
-  __syncthreads();
-
-  // sum of squared deviations for variance
-  float sqsum = 0.0f;
-  for (int i = tid; i < D; i += LN_BLOCK) {
+  float sq = 0.0f;
+  for (int i = lane; i < D; i += WARP) {
     float v = __half2float(x_row[i]);
     if (res_row)
       v += __half2float(res_row[i]);
     float d = v - mean;
-    sqsum += d * d;
+    sq += d * d;
   }
-  sdata[tid] = sqsum;
-  __syncthreads();
+  float rstd = rsqrtf(warp_sum(sq) / float(D) + eps);
 
-  for (int s = LN_BLOCK / 2; s > 0; s >>= 1) {
-    if (tid < s)
-      sdata[tid] += sdata[tid + s];
-    __syncthreads();
-  }
-  float var = sdata[0] / float(D);
-  float rstd = rsqrtf(var + eps);
-
-  // normalize
-  for (int i = tid; i < D; i += LN_BLOCK) {
+  for (int i = lane; i < D; i += WARP) {
     float v = __half2float(x_row[i]);
     if (res_row)
       v += __half2float(res_row[i]);
     float xn = (v - mean) * rstd;
-    float g = __half2float(gamma[i]);
-    float b = __half2float(beta[i]);
-    y_row[i] = __float2half(xn * g + b);
+    y_row[i] =
+        __float2half(xn * __half2float(gamma[i]) + __half2float(beta[i]));
   }
 }
 
@@ -80,9 +63,8 @@ __global__ void layernorm_naive_kernel(const __half *__restrict__ x,
 void launch_layernorm(const __half *x, const __half *gamma, const __half *beta,
                       __half *y, int M, int D, float eps,
                       const __half *residual) {
-  dim3 grid(M);
-  dim3 block(LN_BLOCK);
-  layernorm_naive_kernel<<<grid, block>>>(x, residual, gamma, beta, y, M, D,
-                                          eps);
+  int threads = WARPS_PER_BLOCK * WARP;
+  int blocks = (M + WARPS_PER_BLOCK - 1) / WARPS_PER_BLOCK;
+  layernorm_kernel<<<blocks, threads>>>(x, residual, gamma, beta, y, M, D, eps);
   CUDA_CHECK_KERNEL();
 }
