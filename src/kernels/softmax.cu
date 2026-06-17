@@ -3,57 +3,49 @@
 
 namespace {
 
-constexpr int SM_BLOCK = 256;
+constexpr int WARP = 32;
+constexpr int WARPS_PER_BLOCK = 8;
 
+__inline__ __device__ float warp_max(float v) {
+  for (int o = WARP / 2; o > 0; o >>= 1)
+    v = fmaxf(v, __shfl_xor_sync(0xffffffff, v, o));
+  return v;
+}
+
+__inline__ __device__ float warp_sum(float v) {
+  for (int o = WARP / 2; o > 0; o >>= 1)
+    v += __shfl_xor_sync(0xffffffff, v, o);
+  return v;
+}
+
+// One warp per row. Rows here are at most a few hundred wide, so a warp with
+// shuffle reductions beats a full block with shared memory and __syncthreads.
 __global__ void softmax_kernel(__half *__restrict__ x, int M, int N) {
-  int row = blockIdx.x;
+  int row = (blockIdx.x * blockDim.x + threadIdx.x) / WARP;
   if (row >= M)
     return;
-  int tid = threadIdx.x;
+  int lane = threadIdx.x % WARP;
+  __half *r = x + size_t(row) * N;
 
-  __half *x_row = x + size_t(row) * N;
-  __shared__ float sdata[SM_BLOCK];
-
-  // row max for stability
   float m = -1e30f;
-  for (int i = tid; i < N; i += SM_BLOCK)
-    m = fmaxf(m, __half2float(x_row[i]));
-  sdata[tid] = m;
-  __syncthreads();
+  for (int i = lane; i < N; i += WARP)
+    m = fmaxf(m, __half2float(r[i]));
+  m = warp_max(m);
 
-  for (int s = SM_BLOCK / 2; s > 0; s >>= 1) {
-    if (tid < s)
-      sdata[tid] = fmaxf(sdata[tid], sdata[tid + s]);
-    __syncthreads();
-  }
-  float row_max = sdata[0];
-  __syncthreads();
-
-  // sum of exp
   float sum = 0.0f;
-  for (int i = tid; i < N; i += SM_BLOCK)
-    sum += expf(__half2float(x_row[i]) - row_max);
-  sdata[tid] = sum;
-  __syncthreads();
+  for (int i = lane; i < N; i += WARP)
+    sum += expf(__half2float(r[i]) - m);
+  float inv = 1.0f / warp_sum(sum);
 
-  for (int s = SM_BLOCK / 2; s > 0; s >>= 1) {
-    if (tid < s)
-      sdata[tid] += sdata[tid + s];
-    __syncthreads();
-  }
-  float inv = 1.0f / sdata[0];
-
-  for (int i = tid; i < N; i += SM_BLOCK) {
-    float e = expf(__half2float(x_row[i]) - row_max);
-    x_row[i] = __float2half(e * inv);
-  }
+  for (int i = lane; i < N; i += WARP)
+    r[i] = __float2half(expf(__half2float(r[i]) - m) * inv);
 }
 
 } // namespace
 
 void launch_softmax(__half *x, int M, int N) {
-  dim3 grid(M);
-  dim3 block(SM_BLOCK);
-  softmax_kernel<<<grid, block>>>(x, M, N);
+  int threads = WARPS_PER_BLOCK * WARP;
+  int blocks = (M + WARPS_PER_BLOCK - 1) / WARPS_PER_BLOCK;
+  softmax_kernel<<<blocks, threads>>>(x, M, N);
   CUDA_CHECK_KERNEL();
 }
