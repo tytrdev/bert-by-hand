@@ -1,7 +1,6 @@
 #include "core/device_buffer.h"
 #include "core/model_config.h"
 #include "kernels/attention.h"
-#include "kernels/bias.h"
 #include "kernels/gelu.h"
 #include "kernels/layernorm.h"
 #include "kernels/matmul.h"
@@ -17,11 +16,10 @@ inline __half *as_half(DeviceBuffer &b) {
   return static_cast<__half *>(b.data());
 }
 
-// hidden (M, HIDDEN) @ weight^T (HIDDEN, HIDDEN) + bias -> out (M, HIDDEN)
+// out (m, n) = x (m, k) @ weight^T (n, k) + bias, bias fused into the matmul.
 void linear(const __half *x, const __half *w, const __half *b, __half *out,
             int m, int n, int k) {
-  launch_matmul(x, w, out, m, n, k);
-  launch_add_bias(out, b, m, n);
+  launch_matmul(x, w, out, m, n, k, b);
 }
 
 } // namespace

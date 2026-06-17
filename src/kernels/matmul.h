@@ -7,5 +7,6 @@
 
 #include <cuda_fp16.h>
 
+// C = A @ B^T (+ bias broadcast over rows, when bias != nullptr).
 void launch_matmul(const __half *A, const __half *B, __half *C, int M, int N,
-                   int K);
+                   int K, const __half *bias = nullptr);
