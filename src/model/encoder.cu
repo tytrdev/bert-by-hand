@@ -4,7 +4,6 @@
 #include "kernels/gelu.h"
 #include "kernels/layernorm.h"
 #include "kernels/matmul.h"
-#include "kernels/residual.h"
 #include "kernels/softmax.h"
 #include "model/encoder.h"
 #include "model/workspace.h"
@@ -27,7 +26,6 @@ void linear(const __half *x, const __half *w, const __half *b, __half *out,
 void attention_block(Workspace &ws, const __half *hidden, const AttnWeights &w,
                      const int32_t *mask, __half *out) {
   using namespace model;
-  const int rows = SEQ_LEN * HIDDEN;
   const float scale = 1.0f / std::sqrt(float(HEAD_DIM));
 
   linear(hidden, w.q_w, w.q_b, as_half(ws.q), SEQ_LEN, HIDDEN, HIDDEN);
@@ -53,15 +51,13 @@ void attention_block(Workspace &ws, const __half *hidden, const AttnWeights &w,
 
   linear(as_half(ws.merged), w.o_w, w.o_b, as_half(ws.attn_proj), SEQ_LEN,
          HIDDEN, HIDDEN);
-  launch_residual_add(as_half(ws.attn_proj), hidden, rows);
   launch_layernorm(as_half(ws.attn_proj), w.ln_w, w.ln_b, out, SEQ_LEN, HIDDEN,
-                   LAYER_NORM_EPS);
+                   LAYER_NORM_EPS, hidden);
 }
 
 void ffn_block(Workspace &ws, const __half *hidden, const FfnWeights &w,
                __half *out) {
   using namespace model;
-  const int rows = SEQ_LEN * HIDDEN;
 
   linear(hidden, w.inter_w, w.inter_b, as_half(ws.inter), SEQ_LEN, FFN_DIM,
          HIDDEN);
@@ -69,9 +65,8 @@ void ffn_block(Workspace &ws, const __half *hidden, const FfnWeights &w,
 
   linear(as_half(ws.inter), w.out_w, w.out_b, as_half(ws.ffn_proj), SEQ_LEN,
          HIDDEN, FFN_DIM);
-  launch_residual_add(as_half(ws.ffn_proj), hidden, rows);
   launch_layernorm(as_half(ws.ffn_proj), w.ln_w, w.ln_b, out, SEQ_LEN, HIDDEN,
-                   LAYER_NORM_EPS);
+                   LAYER_NORM_EPS, hidden);
 }
 
 void encoder_layer(Workspace &ws, const __half *hidden, const LayerWeights &w,
