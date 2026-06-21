@@ -1,11 +1,8 @@
 # bert-by-hand
 
-Raw CUDA inference for `all-MiniLM-L6-v2` sentence embeddings. No cuBLAS, no
-CUTLASS, no libraries — every kernel hand-written. Built on CachyOS against a
-3090.
+Raw CUDA inference for `all-MiniLM-L6-v2` sentence embeddings. No cuBLAS, no CUTLASS, no libraries. Built on CachyOS against an RTX 3090.
 
-Goal: match or beat PyTorch (which is cuBLAS underneath) on the same machine.
-Result: **parity at seq=128, ~1.7x faster at the real sequence length.**
+Goal: match or beat PyTorch (which is cuBLAS underneath) on the same machine. Result: **parity at seq=128, ~1.7x faster at the real sequence length.**
 
 ## Build / test / bench
 
@@ -21,8 +18,7 @@ uv run python scripts/dump_corpus.py           # tokenize 2000 STS sentences + t
 uv run python scripts/benchmark_corpus.py      # pytorch, same corpus
 ```
 
-fp16 weights, fp32 reference. Every kernel has a parity test; end-to-end cosine
-vs the torch embedding is 0.9999.
+`fp16` weights, `fp32` reference. Every kernel has a parity test. End-to-end cosine vs the torch embedding is 0.9999.
 
 ## Result (batch 64, same 9-token sentence)
 
@@ -30,13 +26,11 @@ vs the torch embedding is 0.9999.
 | -------------------- | ------------ | --------------- |
 | 128 (forced padding) | 0.090        | 0.092           |
 | 16 (effective length)| **0.015**    | 0.025           |
-| 9 (pytorch tightest) | — (16 floor) | 0.023           |
+| 9 (pytorch tightest) | - (16 floor) | 0.023           |
 
-Parity where compute dominates; a real win where per-forward overhead dominates.
+Parity where compute dominates. A real win where per-forward overhead dominates.
 
-Over 2000 real sentences (STS benchmark, varied length), forward only, each
-batch padded to its longest like sentence-transformers does. Mean cosine vs the
-torch embedding is 1.00000.
+Over 2000 real sentences (STS benchmark, varied length), forward only, each batch padded to its longest like sentence-transformers does. Mean cosine vs the torch embedding is 1.00000.
 
 | approach                  | throughput     |
 | ------------------------- | -------------- |
@@ -44,11 +38,9 @@ torch embedding is 1.00000.
 | ours, dynamic length      | **54,000 sent/s** |
 | pytorch, dynamic length   | 39,000 sent/s  |
 
-## How (each step is one commit; batch-64 ms/sent)
+## How
 
-Single sentence, working up the kernel stack: naive 7.0 → tiled shared mem 2.6 →
-tensor cores (wmma) 0.91 → masked attention parity. Then batched (M = B*seq) and
-the real work begins:
+Single sentence, working up the kernel stack: naive 7.0 → tiled shared mem 2.6 → tensor cores (wmma) 0.91 → masked attention parity. Then batched (M = B*seq) and the real work begins:
 
 | step | ms/sent | idea |
 | ---- | ------- | ---- |
@@ -71,7 +63,7 @@ __pipeline_commit();
 __pipeline_wait_prior(1);
 ```
 
-**fp16 accumulate** — GeForce caps `fp16->fp32` tensor ops at half the
+**fp16 accumulate**: GeForce caps `fp16->fp32` tensor ops at half the
 `fp16->fp16` rate. Six layers tolerate the precision loss (cos stays 0.9999):
 
 ```cuda
@@ -85,7 +77,7 @@ slice straight out with a strided wmma load (no split-heads buffer):
 wmma::load_matrix_sync(af, qkv + row * qkv_stride + q_off + d0, qkv_stride);
 ```
 
-**effective length** — the sentence is 9 real tokens; we (and the seq=128
+**effective length**: the sentence is 9 real tokens; we (and the seq=128
 benchmark) burn 87% of every matmul on padding that gets masked then averaged
 away. Process the real length (rounded to 16); the embedding is identical.
 
@@ -106,22 +98,19 @@ bert_embed(ws, w, ids, types, mask, emb, batch, eff);   // seq is a runtime arg
 - **Fused flash attention** (scores+softmax+context in one block, scores in
   shared): *slower*. 32 KB of shared scores → 1 block/SM, and the three
   serialized phases lose more than the saved global traffic (L2 caches it). A
-  flash kernel that wins needs key-blocking + online softmax to keep occupancy —
-  that is `fmha_cutlassF`.
+  flash kernel that wins needs key-blocking + online softmax to keep occupancy (that is `fmha_cutlassF`).
 - **Shared-memory padding / bigger tiles**: net wash. Bank conflicts weren't the
   bottleneck, and big tiles only help large-N GEMMs; ours are small-N.
 
 ## Insights
 
-- **PyTorch is ~70% GEMM too** (profiled both sides with nsys). There is no
-  magic kernel we missed — the GEMM is the wall for both.
+- **PyTorch is ~70% GEMM too** (profiled both sides with nsys). There is no magic kernel we missed, the GEMM is the bottleneck for both.
 - **We're ahead on fusion.** PyTorch runs gelu, bias, and residual as *separate*
-  kernels; we fold them into matmul/layernorm epilogues. That advantage is what
+  kernels. Fold them into matmul/layernorm epilogues. That advantage is what
   lets a simpler 2-stage GEMM reach parity with cuBLAS.
-- **fp16 accumulate is the lever that closes the GEMM gap** — cuBLAS keeps fp32
+- **fp16 accumulate is the lever that closes the GEMM gap**. cuBLAS keeps fp32
   accumulate (the safe default) and eats the GeForce half-rate penalty.
 - **The length win is overhead, not compute.** At seq=16 the math is tiny, so
   the forward is launch/dispatch bound, and our fused, fixed-shape, zero-alloc
   kernel set has far less overhead than PyTorch's many kernels + Python. The
-  length speedup itself helps both engines equally — it's a "do less work" win,
-  not out-engineering cuBLAS.
+  length speedup itself helps both engines equally.
